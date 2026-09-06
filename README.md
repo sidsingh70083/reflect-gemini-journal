@@ -1,50 +1,126 @@
 # Reflect — Mindful Personal Journaling Application
 
-Reflect is a mindful, user-authenticated personal journaling web application powered by Google Cloud Run, Cloud Firestore, and the Gemini API (`gemini-3.6-flash`). It offers multi-turn conversational journaling, intelligent AI-driven emotional categorization, manual user mood overrides, daily streak progression, and introspective icebreaker prompts.
+Reflect is a user-authenticated personal journaling web application powered by Google Cloud Run, Cloud Firestore, Firebase Authentication, and the Gemini API (`gemini-3.6-flash`).
+
+It goes beyond a chat wrapper: reflections are automatically categorised by emotional theme, surfaced back as weekly AI retrospectives and longitudinal cadence heatmaps, and turned into small next-day commitments the app gently follows up on. Entries can be written, dictated by voice, or recorded as video, and users can schedule letters to their future selves.
 
 ---
 
-## 🛡️ Agentic Threat Modeling & Security Architecture
+## ✨ Features
+
+### Core
+
+| Capability | Implementation |
+| :--- | :--- |
+| **User Authentication** | Google Sign-In via Firebase Authentication. No email/password credentials are stored by the application. |
+| **Multi-turn AI Journaling** | Real conversational sessions with Gemini, warm and non-clinical in tone, with full context preserved across turns. |
+| **Isolated Data Storage** | Every document lives under `users/{uid}/…` and is enforced by owner-bound Firestore security rules. Zero cross-user visibility. |
+| **Secure Key Management** | `GEMINI_API_KEY` is resolved server-side only, from Google Cloud Secret Manager / environment binding. The client bundle contains no secrets and never calls Gemini directly. |
+
+### Original feature enhancements
+
+- **Smart emotional categorisation with user override** — on save, Gemini assigns one of seven categories (Gratitude, Stress, Reflection, Excitement, Problem-Solving, Sadness, Neutral) plus a one-line summary. Both the AI's assignment (`aiCategory`) and the user's correction (`userCategory`) are retained, so overrides persist without destroying the model's original judgement.
+- **Micro-commitment loop** — at the end of a session, Gemini extracts one small, concrete action for the next day. On a later calendar day the app surfaces a single non-intrusive check-in for the most recent outstanding commitment, records the response, and never asks twice.
+- **Weekly AI retrospective digests** — once enough reflections accumulate, Gemini synthesises the window into a structured digest: date range, recurring theme chips, mood-shift narrative, category distribution, gentle observations, and a closing encouragement. Digests persist to `users/{uid}/digests/{digestId}` and remain browsable.
+- **Cadence & emotional heatmap** — a calendar heatmap of journaling frequency coloured by each day's dominant mood, plus time-of-day pattern analysis, computed from the user's own entry history in their local timezone.
+- **Dear Future Me** — compose a letter, schedule it for a future date, and have it stay sealed until then. On unlock the letter is revealed with a Gemini-generated reflection question inviting comparison between who wrote it and who is reading it. Both the written date and arrival date are shown.
+- **Voice and video journaling** — dictate an entry via audio capture with server-side Gemini transcription, or record a video reflection for analysis, for days when typing is too much friction.
+- **Growing streak** — consecutive journaling days are represented as a growth metaphor rather than a bare counter, progressing through Ready to Bloom → Seedling Sprout → Flourishing Growth → Blooming Lotus → Deep-Rooted Tree.
+- **Ice-breaker starter prompts** — a large curated pool of introspective openers, three surfaced at a time with a shuffle that avoids repeats, occasionally supplemented by Gemini-generated prompts conditioned on recent entries. Collapsible so returning users aren't crowded, expanded by default for newcomers.
+- **PDF export** — export reflections as a formatted document.
+- **Optional location context** — opt-in reverse geocoding to give entries a sense of place, off by default and stored only with consent.
+
+### Experience
+
+- Draft sessions survive tab navigation and page reloads; in-flight Gemini responses continue generating in the background rather than being dropped when the user switches tabs.
+- Collapsible **Past Reflections** side drawer, grouped by Today / Yesterday / This Week / Earlier, with newest-first or oldest-first sorting.
+- Inline delete confirmation (avoids `window.confirm`, which is unreliable in sandboxed iframes).
+- Persistent dark mode, theme-matched scrollbars, and calm 200–300ms transitions throughout.
+
+---
+
+## 🛡️ Threat Modelling & Security Architecture
 
 | Threat Zone | Identified Risks | Countermeasures & Applied Controls |
 | :--- | :--- | :--- |
-| **Input Surfaces** | Malicious chat payloads, XSS in journal entries, oversized request bodies. | Strict Express body limits (`2MB`), React JSX output encoding, defensive payload sanitization, and structured prompt isolation. |
-| **Planning & Reasoning** | Prompt injection attempting to alter categorization taxonomy or companion persona. | Isolated system instructions, structured output parsing with deterministic fallback heuristics, non-executable message boundaries. |
-| **Tool & API Execution** | API key leakage, unauthorized AI proxy usage, server overload / status code errors. | Server-side Gemini API proxy, resilient fallback ladder (`gemini-3.6-flash` → `gemini-flash-latest`), null-safe error recovery. |
-| **Memory & State** | Cross-user data contamination, unauthorized reading/writing of other users' journals. | Strict Cloud Firestore owner-bound path isolation (`users/{userId}/entries/{entryId}`) validated by security rules (`request.auth.uid == userId`). |
-| **Inter-System Communication** | Token interception, unauthorized database mutations. | HTTPS/TLS transport encryption, Firebase Auth JWT verification, client-side zero-secret architecture. |
+| **Input Surfaces** | Malicious chat payloads, XSS in journal entries, oversized request bodies. | Express body limits (`50MB`, sized for audio/video payloads), React JSX output encoding, defensive payload sanitisation, structured prompt isolation. |
+| **Planning & Reasoning** | Prompt injection attempting to alter categorisation taxonomy or companion persona. | Isolated system instructions, structured output parsing with deterministic fallback heuristics, non-executable message boundaries. |
+| **Tool & API Execution** | API key leakage, unauthorised AI proxy usage, upstream model unavailability. | Server-side Gemini proxy (all eight client calls target first-party `/api/*` routes), resilient model fallback ladder (`gemini-3.6-flash` → `gemini-flash-latest`), null-safe error recovery. |
+| **Memory & State** | Cross-user data contamination, unauthorised reads or writes of other users' journals. | Owner-bound Firestore path isolation (`users/{userId}/…`) validated by security rules (`request.auth.uid == userId`), applied recursively to all subcollections. |
+| **Inter-System Communication** | Token interception, unauthorised database mutations. | HTTPS/TLS transport encryption, Firebase Auth JWT verification, client-side zero-secret architecture. |
+
+---
+
+## 🏗️ Architecture
+
+```
+Client (React 19 + TypeScript + Vite + Tailwind)
+  │  Firebase Auth (Google Sign-In)  ──►  Firebase
+  │  Firestore SDK (owner-scoped reads/writes, enforced by rules)
+  │
+  └─ fetch /api/*  ──►  Express server (server.ts) on Cloud Run
+                          │  GEMINI_API_KEY from Secret Manager (server-only)
+                          └─ @google/genai  ──►  Gemini API
+```
+
+### Server routes
+
+| Route | Purpose |
+| :--- | :--- |
+| `GET /api/health` | Liveness probe. |
+| `POST /api/chat` | Multi-turn conversational journaling. |
+| `POST /api/session/summarize` | Summary, category assignment, and next-day commitment extraction. |
+| `POST /api/audio/transcribe` | Voice note transcription. |
+| `POST /api/video/analyze` | Video reflection analysis. |
+| `POST /api/prompts/generate` | Contextual prompt generation. |
+| `POST /api/letter/unlock-reflection` | Reflection question generated when a scheduled letter unlocks. |
+| `POST /api/digest/generate` | Weekly retrospective synthesis. |
+| `GET /api/geocode/reverse` | Opt-in reverse geocoding for location context. |
+
+### Firestore data model
+
+```
+users/{uid}
+  ├── entries/{entryId}
+  │     createdAt, messages[{role, text, timestamp}], summary,
+  │     aiCategory, userCategory, nextDayCommitment, commitmentCheckin
+  ├── digests/{digestId}
+  │     dateRange, title, themes[], moodShift, distribution, observations
+  └── letters/{letterId}
+        content, createdAt, scheduledDate, scheduledMillis, unlocked
+```
 
 ---
 
 ## 📋 Prerequisites
 
-1. **Google Cloud Project**: An active GCP project with billing enabled.
-2. **Google Cloud SDK (`gcloud` CLI)**: Installed and authenticated.
-3. **Node.js**: v20+ and npm.
-4. **Firebase CLI**: Installed (`npm install -g firebase-tools`).
+- **Google Cloud Project** with billing enabled
+- **Google Cloud SDK** (`gcloud` CLI), installed and authenticated
+- **Node.js** v20+ and npm
+- **Firebase CLI** (`npm install -g firebase-tools`)
 
-Enable the necessary APIs:
+Enable the required APIs:
+
 ```bash
 gcloud services enable \
   run.googleapis.com \
   secretmanager.googleapis.com \
   firestore.googleapis.com \
-  cloudbuild.googleapis.com \
-  aiplatform.googleapis.com
+  cloudbuild.googleapis.com
 ```
 
 ---
 
 ## 🔑 Secret Management Setup
 
-Reflect adheres to strict zero-hardcoding hygiene. The `GEMINI_API_KEY` is managed securely via Google Cloud Secret Manager.
+The `GEMINI_API_KEY` is never hardcoded or exposed to the client. It is stored in Google Cloud Secret Manager and bound to the Cloud Run service at runtime.
 
 ```bash
-# 1. Create and populate the secret in Secret Manager
+# 1. Create and populate the secret
 gcloud secrets create GEMINI_API_KEY --replication-policy="automatic"
 echo -n "YOUR_GEMINI_API_KEY_HERE" | gcloud secrets versions add GEMINI_API_KEY --data-file=-
 
-# 2. Grant the Cloud Run compute service account permission to access the secret
+# 2. Grant the Cloud Run service account read access
 PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format="value(projectNumber)")
 
 gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
@@ -56,16 +132,14 @@ gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
 
 ## 🔒 Cloud Firestore Security Rules
 
-Deploy the owner-bound security rules to ensure zero insecure defaults and complete user data isolation:
-
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // User data isolation: only authenticated owner can read or modify their entries
+    // User data isolation: only the authenticated owner may read or modify their documents
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
-      
+
       match /{allSubcollections=**} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
@@ -74,7 +148,10 @@ service cloud.firestore {
 }
 ```
 
-Deploy rules using Firebase CLI:
+The recursive `{allSubcollections=**}` match extends owner-binding to `entries`, `digests`, and `letters`, so no subcollection can be reached by a non-owner even if a client attempted a direct path read.
+
+Deploy:
+
 ```bash
 firebase deploy --only firestore:rules
 ```
@@ -82,8 +159,6 @@ firebase deploy --only firestore:rules
 ---
 
 ## 🚀 Cloud Run Deployment
-
-Deploy the containerized full-stack application to Cloud Run with attached Secret Manager secrets:
 
 ```bash
 gcloud run deploy reflect-app \
@@ -94,9 +169,7 @@ gcloud run deploy reflect-app \
   --set-env-vars NODE_ENV=production
 ```
 
-### Mandatory Campaign Verification Label
-
-Apply the required challenge label for automated verification:
+### Verification label
 
 ```bash
 gcloud run services update reflect-app \
@@ -108,82 +181,50 @@ gcloud run services update reflect-app \
 
 ## 🧪 Functional Walkthrough & Test Guide
 
-Every user interaction has a corresponding verification test case:
+**1. Unauthenticated landing & Google Sign-In**
+Open the application URL without an active session. A minimal landing page shows the app name, a one-line tagline, and a single "Sign in with Google" button. Completing the popup transitions to the private dashboard with the user's name, avatar, streak indicator, and tabs.
 
-### Test Case 1: Unauthenticated Landing & Google Sign-In
-- **Action**: Open the application URL without an active Firebase session.
-- **Expected Result**: Minimal, calm landing page showing the app name ("Reflect"), one-line tagline, and the single "Sign in with Google" button.
-- **Action**: Click "Sign in with Google". Complete popup authentication.
-- **Expected Result**: Transitions instantly to the private dashboard, displaying the user's name, avatar, streak counter, and tabs.
+**2. Greeting & starter prompts**
+On **My Space**, a personalised greeting appears with a rotating supportive line and three starter prompt chips. Shuffle rotates to three new prompts without repeating within the session. Tapping a prompt pre-fills the composer for editing. The block collapses via its chevron and remembers that preference.
 
-### Test Case 2: Greeting & Starter Reflection Prompts
-- **Action**: Navigate to "My Space".
-- **Expected Result**: Personalized greeting displays "Welcome, {FirstName}!" with a rotating supportive message. Three randomized starter prompt chips are displayed.
-- **Action**: Click the "Shuffle" button.
-- **Expected Result**: Prompts rotate to 3 new introspective questions from the pool.
-- **Action**: Click one starter prompt (e.g. "Something that went well recently...").
-- **Expected Result**: The chat composer text area is populated with that prompt text and focused for editing.
+**3. Multi-turn conversational journaling**
+Send a message. It renders right-aligned, a thinking indicator appears, and Gemini replies with an empathetic reflection and follow-up. Context is preserved across several turns.
 
-### Test Case 3: Multi-turn Conversational Journaling with Gemini
-- **Action**: Type a thought and hit Enter or click the Send button.
-- **Expected Result**: User message renders aligned to the right. A thinking indicator appears. Gemini returns an empathetic, non-clinical reflection and follow-up inquiry.
-- **Action**: Send 2-3 follow-up reflections within the same session.
-- **Expected Result**: Complete conversation scrolls smoothly, preserving context throughout the session.
+**4. Voice journaling**
+Tap the microphone in the composer. Recording state is visually indicated; audio is transcribed server-side and appended into the composer for editing before sending. Unsupported browsers show a clear disabled state rather than failing silently.
 
-### Test Case 4: Voice Input Tooltip
-- **Action**: Click the microphone icon in the chat composer.
-- **Expected Result**: A tooltip appears stating "Voice input coming soon" and disappears smoothly after 2.8 seconds.
+**5. Save & end session with auto-categorisation**
+Click **Save & End Session**. The session is summarised, assigned a category, and persisted to `users/{uid}/entries/{entryId}`. Gemini also extracts a next-day micro-commitment where one naturally arises. The composer resets.
 
-### Test Case 5: Save & End Session with Smart Auto-Categorization
-- **Action**: Click "Save & End Session" at the top or bottom of the active workspace.
-- **Expected Result**: Active session is sent to `/api/session/summarize`. Gemini categorizes the theme (e.g. Gratitude, Stress, Reflection) and generates a one-line summary. The entry persists to Firestore under `users/{uid}/entries/{entryId}`. The chat area resets cleanly.
+**6. Category override**
+In **Past Reflections**, tap an entry's category chip and select a different mood. The chip updates immediately and persists as `userCategory` while `aiCategory` is preserved.
 
-### Test Case 6: Category Mood Override
-- **Action**: Locate the saved entry in the "Past Reflections" section.
-- **Expected Result**: Entry displays the date, one-line summary, and assigned category chip.
-- **Action**: Click the category chip. Select a different mood (e.g. switch from "Reflection" to "Gratitude").
-- **Expected Result**: Chip updates immediately to the new color/tag and persists to Firestore under `userCategory` while preserving `aiCategory`.
+**7. History drawer, sorting, and deletion**
+Open the **Past Reflections** drawer. Entries are grouped under Today / Yesterday / This Week / Earlier, each showing its own creation time, category chip, and summary. Sorting toggles between newest-first and oldest-first. Tapping expands the full read-only transcript. Delete prompts an inline confirmation before removing the document from Firestore.
 
-### Test Case 7: Expandable History Drawer & Safe Inline Deletion
-- **Action**: Click the "Past Reflections" button in the top right of My Space.
-- **Expected Result**: The past reflections slide-out side panel drawer opens smoothly.
-- **Action**: Click a past entry card.
-- **Expected Result**: Expands to reveal the full read-only transcript with message timestamps.
-- **Action**: Click "Delete" on the entry.
-- **Expected Result**: An inline confirmation prompts: *"Delete this entry? This can't be undone."* with [Delete] and [Cancel] buttons (guaranteeing reliability in iframe sandboxes without `window.confirm`).
-- **Action**: Click [Delete].
-- **Expected Result**: Entry document is immediately deleted from Firestore (`users/{uid}/entries/{entryId}`) and disappears from the history list.
+**8. Draft persistence & uninterrupted generation**
+Start a conversation, then switch to **Patterns** or **Dear Future Me** and return, or reload the tab. The in-progress draft is preserved. A Gemini response still generating when you navigate away continues in the background and is intact on return.
 
-### Test Case 8: In-Progress Draft Persistence Across Tab Navigation & Page Reload
-- **Action**: In "My Space", type an entry and send 1-2 messages with Gemini.
-- **Expected Result**: Active conversation is displayed with option to Save & End Session or Discard.
-- **Action**: Click the "Trends" tab or "Letter to Future" tab in the navigation bar.
-- **Action**: Switch back to "My Space" tab (or refresh the browser tab).
-- **Expected Result**: The in-progress draft conversation and textarea buffer are fully preserved without loss.
-- **Action**: Click "Discard" and confirm.
-- **Expected Result**: The active draft is safely cleared.
+**9. Micro-commitment check-in**
+On a later calendar day, a slim dismissible banner surfaces the most recent outstanding commitment with quick-tap responses. Once answered or dismissed it is recorded and not shown again.
 
-### Test Case 9: Global Dark Mode Toggle Persistence
-- **Action**: Click the sun/moon dark mode toggle in the header.
-- **Expected Result**: The entire application (header, tabs, composer, history drawer, cards, and text) seamlessly switches between warm light and dark palettes.
-- **Action**: Refresh the page.
-- **Expected Result**: The selected theme preference is remembered and applied automatically from `localStorage`.
+**10. Dark mode**
+Toggle in the header switches the entire interface between light and dark palettes. The preference persists across reloads.
 
-### Test Case 10: Weekly AI Retrospective Digest in Trends Tab
-- **Action**: Click the "Trends" tab.
-- **Expected Result**: Displays the Weekly Retrospective dashboard with current progress (e.g. `X / 7 reflections`, `Y / 7 days active`).
-- **Action**: Click "Generate Retrospective" (or "Generate Early Retrospective").
-- **Expected Result**: Gemini synthesizes the window of reflections into a structured weekly digest featuring:
-  - Date range & reflection count
-  - Poetic title
-  - Recurring themes chips
-  - Mood shift narrative
-  - Category distribution breakdown
-  - Gentle observations
-  - Compassionate encouragement closing
-- **Action**: Digest is saved to Firestore under `users/{uid}/digests/{digestId}` and rendered in reverse-chronological order.
-- **Action**: Click the digest card to expand/collapse full details, or click Delete to remove from archives.
+**11. Weekly retrospective**
+On **Patterns**, view progress toward the next digest and generate one when eligible. Gemini produces a titled digest with themes, mood-shift narrative, category distribution, observations, and a closing note, saved to `users/{uid}/digests/{digestId}` and listed in reverse-chronological order.
 
-### Test Case 11: Letter to Future Placeholder
-- **Action**: Click "Letter to Future".
-- **Expected Result**: Renders the clean "Coming soon" screen explaining scheduled introspective letters.
+**12. Cadence & emotional heatmap**
+Below the retrospectives, a calendar heatmap shows journaling frequency coloured by each day's dominant mood, alongside time-of-day pattern analysis. Sparse histories show a friendly encouragement rather than an empty grid.
+
+**13. Dear Future Me**
+Compose a letter and schedule it for a future date. Sealed letters list their unlock date with content hidden. On or after the scheduled date, the letter unlocks with a distinct reveal, shows both its written and arrival dates, and is accompanied by a Gemini-generated reflection question.
+
+**14. Cross-user isolation**
+Sign in with a second Google account in a separate browser profile. Create entries on both. Neither account can see the other's entries, digests, or letters — enforced by security rules, not merely hidden in the UI.
+
+---
+
+## 🧰 Tech Stack
+
+React 19 · TypeScript · Vite 6 · Tailwind CSS 4 · Motion · Lucide · Express 4 · `@google/genai` · Firebase Auth · Cloud Firestore · Cloud Run · Secret Manager · Gemini API
