@@ -63,7 +63,6 @@ import {
 import {
   useVideoRecorder,
   VideoRecorderStudio,
-  VideoRecordButton,
 } from './VideoRecorder';
 import {
   updateEntryCategory,
@@ -978,92 +977,139 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
               className="w-full resize-none overflow-hidden bg-transparent py-1.5 px-2 text-sm text-[#3A3A35] dark:text-[#EDEAE2] placeholder:text-[#858376] dark:placeholder:text-[#8E8C7F] focus:outline-none leading-normal min-h-[36px]"
             />
 
-            {/* Desktop Action Controls */}
-            <div className="hidden sm:flex items-center gap-1.5 flex-shrink-0 pb-1 pr-1">
+            {/* Action Controls */}
+            <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0 pb-1 pr-0.5 sm:pr-1">
+              {/* '+' menu button for secondary options (Video note, etc.) */}
+              <button
+                id="composer-more-tools-button"
+                type="button"
+                onClick={() => setIsMoreMenuOpen((v) => !v)}
+                className={`p-1.5 sm:p-2 rounded-lg sm:rounded-xl border transition-all duration-200 cursor-pointer shadow-2xs flex items-center justify-center ${
+                  isMoreMenuOpen
+                    ? 'bg-[#5A5A40] text-white border-[#5A5A40] dark:bg-[#D4D0C2] dark:text-[#1A1916]'
+                    : 'bg-[#FFFFFF] dark:bg-[#282621] text-[#757469] dark:text-[#A6A498] border-[#D5D2C7] dark:border-[#3E3C34] hover:bg-[#F4F1E8] dark:hover:bg-[#2A2823]'
+                }`}
+                title={isMoreMenuOpen ? 'Close options' : 'More reflection options'}
+                aria-label={isMoreMenuOpen ? 'Close options' : 'More reflection options'}
+                aria-expanded={isMoreMenuOpen}
+              >
+                <Plus className={`w-3.5 h-3.5 sm:w-4 sm:h-4 transition-transform duration-200 ${isMoreMenuOpen ? 'rotate-45' : ''}`} />
+              </button>
+
+              {/* Voice Note (Microphone) */}
               <AudioRecordButton
                 recorder={audioRecorder}
                 disabled={isGenerating || isSaving || videoRecorder.isRecording}
-                size="md"
+                size={isMobileDevice ? 'sm' : 'md'}
               />
-              <VideoRecordButton
-                recorder={videoRecorder}
-                disabled={isGenerating || isSaving || audioRecorder.isRecording}
-              />
+
+              {/* Send Button */}
               <button
                 id="send-message-button"
                 type="button"
                 disabled={!inputText.trim() || isGenerating}
                 onClick={handleSendMessage}
-                className="p-2.5 rounded-xl bg-[#4A4A38] hover:bg-[#38382A] text-[#F8F7F3] dark:bg-[#D4D0C2] dark:hover:bg-[#E2DFD6] dark:text-[#1A1916] transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed shadow-2xs active:scale-95"
+                className="p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl bg-[#4A4A38] hover:bg-[#38382A] text-[#F8F7F3] dark:bg-[#D4D0C2] dark:hover:bg-[#E2DFD6] dark:text-[#1A1916] transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed shadow-2xs active:scale-95"
                 title="Send message"
                 aria-label="Send message"
               >
-                <Send className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Mobile Compact Action Controls */}
-            <div className="flex sm:hidden items-center gap-1 flex-shrink-0 pb-1 pr-0.5">
-              {/* '+' menu button for secondary video/multimodal tools */}
-              <button
-                id="mobile-more-tools-button"
-                type="button"
-                onClick={() => setIsMoreMenuOpen((v) => !v)}
-                className={`p-1.5 rounded-lg border transition-all duration-200 cursor-pointer shadow-2xs flex items-center justify-center ${
-                  isMoreMenuOpen
-                    ? 'bg-[#5A5A40] text-white border-[#5A5A40] dark:bg-[#D4D0C2] dark:text-[#1A1916]'
-                    : 'bg-[#FFFFFF] dark:bg-[#282621] text-[#757469] dark:text-[#A6A498] border-[#D5D2C7] dark:border-[#3E3C34] hover:bg-[#F4F1E8] dark:hover:bg-[#2A2823]'
-                }`}
-                title="More reflection tools"
-                aria-label="More reflection tools"
-              >
-                <Plus className={`w-3.5 h-3.5 transition-transform duration-200 ${isMoreMenuOpen ? 'rotate-45' : ''}`} />
-              </button>
-
-              {/* Mic / Voice Recording Button */}
-              <AudioRecordButton
-                recorder={audioRecorder}
-                disabled={isGenerating || isSaving || videoRecorder.isRecording}
-                size="sm"
-              />
-
-              {/* Send Button */}
-              <button
-                id="mobile-send-message-button"
-                type="button"
-                disabled={!inputText.trim() || isGenerating}
-                onClick={handleSendMessage}
-                className="p-1.5 rounded-lg bg-[#4A4A38] hover:bg-[#38382A] text-[#F8F7F3] dark:bg-[#D4D0C2] dark:hover:bg-[#E2DFD6] dark:text-[#1A1916] transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed shadow-2xs active:scale-95"
-                title="Send message"
-                aria-label="Send message"
-              >
-                <Send className="w-3.5 h-3.5" />
+                <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
             </div>
           </div>
 
-          {/* Mobile Secondary Tools Expandable Bar */}
+          {/* Expanded Composer Options Menu */}
           {isMoreMenuOpen && (
-            <div className="sm:hidden flex items-center justify-between gap-2 p-2 bg-[#FAF9F5] dark:bg-[#1D1C18] rounded-xl border border-[#D5D2C7] dark:border-[#3E3C34] animate-in fade-in slide-in-from-top-1 text-xs">
-              <div className="flex items-center gap-2">
-                <VideoRecordButton
-                  recorder={videoRecorder}
-                  disabled={isGenerating || isSaving || audioRecorder.isRecording}
-                />
-                <span className="text-xs text-[#5A5A40] dark:text-[#D4D0C2] font-medium">
-                  Video Reflection Studio
-                </span>
-              </div>
+            <div
+              id="composer-more-tools-panel"
+              className="flex flex-col gap-1 p-1.5 sm:p-2 bg-[#FAF9F5] dark:bg-[#1D1C18] rounded-xl border border-[#D5D2C7] dark:border-[#3E3C34] animate-in fade-in slide-in-from-top-1 text-xs mt-2 shadow-2xs overflow-hidden"
+            >
+              {/* Option: Video note */}
+              <button
+                id="composer-option-video-note"
+                type="button"
+                disabled={isGenerating || isSaving || audioRecorder.isRecording || videoRecorder.isAnalyzing}
+                onClick={() => {
+                  if (videoRecorder.isOpen) {
+                    videoRecorder.closeCamera();
+                  } else {
+                    videoRecorder.openCamera();
+                    setIsMoreMenuOpen(false);
+                  }
+                }}
+                className={`w-full group relative flex items-center justify-between p-2 sm:p-2.5 rounded-lg text-left transition-all duration-150 cursor-pointer border ${
+                  videoRecorder.isOpen || videoRecorder.isRecording
+                    ? 'bg-[#EAE8E0] dark:bg-[#2A2823] border-[#D5D2C7] dark:border-[#3E3C34]'
+                    : 'bg-transparent hover:bg-[#F2EFE7] dark:hover:bg-[#252420] active:bg-[#EAE8E0] dark:active:bg-[#2F2D27] border-transparent hover:border-[#D5D2C7] dark:hover:border-[#3E3C34]'
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
+                aria-label={videoRecorder.isOpen ? 'Close video note' : 'Record video note'}
+              >
+                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                  <div
+                    className={`p-2 rounded-lg shrink-0 transition-colors ${
+                      videoRecorder.isRecording
+                        ? 'bg-rose-600 text-white animate-pulse'
+                        : videoRecorder.isOpen
+                        ? 'bg-violet-600 text-white'
+                        : 'bg-[#EAE8E0] dark:bg-[#2A2823] text-violet-700 dark:text-violet-300 group-hover:bg-[#DFDCD2] dark:group-hover:bg-[#34322C]'
+                    }`}
+                  >
+                    <Video className={`w-4 h-4 ${videoRecorder.isRecording ? 'animate-bounce' : ''}`} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-semibold text-[#3A3A35] dark:text-[#EDEAE2]">
+                        Video note
+                      </span>
+                      {videoRecorder.isRecording && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 font-medium">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping" />
+                          Recording
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-[#757469] dark:text-[#A6A498] truncate">
+                      Record a short video reflection
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-[11px] font-medium text-[#757469] dark:text-[#A6A498] shrink-0 pl-2">
+                  {videoRecorder.isRecording ? 'Stop' : videoRecorder.isOpen ? 'Close' : 'Open'}
+                </div>
+              </button>
+
+              {/* Option: Location tag (when active in settings) */}
               {isLocationActive && (
                 <button
+                  id="composer-option-location-refresh"
                   type="button"
-                  onClick={fetchLocation}
                   disabled={isLocating}
-                  className="px-2 py-1 text-[11px] text-[#757469] dark:text-[#A6A498] hover:text-[#3A3A35] dark:hover:text-[#EDEAE2] rounded flex items-center gap-1 cursor-pointer"
-                  title="Refresh location"
+                  onClick={fetchLocation}
+                  className="w-full group relative flex items-center justify-between p-2 sm:p-2.5 rounded-lg text-left transition-all duration-150 cursor-pointer border border-transparent hover:border-[#D5D2C7] dark:hover:border-[#3E3C34] bg-transparent hover:bg-[#F2EFE7] dark:hover:bg-[#252420] active:bg-[#EAE8E0] dark:active:bg-[#2F2D27] disabled:opacity-50"
+                  aria-label="Refresh location"
                 >
-                  <MapPin className="w-3 h-3" />
-                  <span>Refresh Loc</span>
+                  <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                    <div className="p-2 rounded-lg shrink-0 bg-[#EAE8E0] dark:bg-[#2A2823] text-[#5A5A40] dark:text-[#D4D0C2] group-hover:bg-[#DFDCD2] dark:group-hover:bg-[#34322C]">
+                      <MapPin className={`w-4 h-4 ${isLocating ? 'animate-spin' : ''}`} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-semibold text-[#3A3A35] dark:text-[#EDEAE2]">
+                        Location tag
+                      </div>
+                      <div className="text-[11px] text-[#757469] dark:text-[#A6A498] truncate">
+                        {isLocating
+                          ? 'Detecting current place...'
+                          : currentLocation
+                          ? currentLocation
+                          : 'Update location for this reflection'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-[11px] font-medium text-[#757469] dark:text-[#A6A498] shrink-0 pl-2">
+                    {isLocating ? 'Locating...' : 'Refresh'}
+                  </div>
                 </button>
               )}
             </div>

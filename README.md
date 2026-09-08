@@ -1,142 +1,252 @@
 # Reflect — Mindful Personal Journaling Application
 
-Reflect is a user-authenticated personal journaling web application powered by Google Cloud Run, Cloud Firestore, Firebase Authentication, and the Gemini API (`gemini-3.6-flash`).
+<div align="center">
 
-It goes beyond a chat wrapper: reflections are automatically categorised by emotional theme, surfaced back as weekly AI retrospectives and longitudinal cadence heatmaps, and turned into small next-day commitments the app gently follows up on. Entries can be written, dictated by voice, or recorded as video, and users can schedule letters to their future selves.
+![Reflect Banner](https://img.shields.io/badge/Reflect-Mindful%20Journaling-4A4A38?style=for-the-badge&logoColor=white)
+<br/>
 
----
+[![React 19](https://img.shields.io/badge/React-19.0-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Vite](https://img.shields.io/badge/Vite-6.2-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
+[![Tailwind CSS 4](https://img.shields.io/badge/Tailwind_CSS-4.1-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
+[![Express](https://img.shields.io/badge/Express-4.21-000000?style=flat-square&logo=express&logoColor=white)](https://expressjs.com/)
+[![Gemini API](https://img.shields.io/badge/Gemini_API-3.8_Flash-8E75B2?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev/)
+[![Cloud Firestore](https://img.shields.io/badge/Cloud_Firestore-Firebase_12-FFA611?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com/)
+[![Cloud Run](https://img.shields.io/badge/Google_Cloud-Cloud_Run-4285F4?style=flat-square&logo=google-cloud&logoColor=white)](https://cloud.google.com/run)
 
-## ✨ Features
+<p align="center">
+  <strong>A calm, private, and restorative journaling companion powered by Gemini AI and Cloud Firestore.</strong><br/>
+  Conversational reflection · Smart emotional categorization · Voice & video journaling · Weekly retrospective digests · Astronomical stillness space · Time-capsule letters · Ambient sound bed
+</p>
 
-### Core
-
-| Capability | Implementation |
-| :--- | :--- |
-| **User Authentication** | Google Sign-In via Firebase Authentication. No email/password credentials are stored by the application. |
-| **Multi-turn AI Journaling** | Real conversational sessions with Gemini, warm and non-clinical in tone, with full context preserved across turns. |
-| **Isolated Data Storage** | Every document lives under `users/{uid}/…` and is enforced by owner-bound Firestore security rules. Zero cross-user visibility. |
-| **Secure Key Management** | `GEMINI_API_KEY` is resolved server-side only, from Google Cloud Secret Manager / environment binding. The client bundle contains no secrets and never calls Gemini directly. |
-
-### Original feature enhancements
-
-- **Smart emotional categorisation with user override** — on save, Gemini assigns one of seven categories (Gratitude, Stress, Reflection, Excitement, Problem-Solving, Sadness, Neutral) plus a one-line summary. Both the AI's assignment (`aiCategory`) and the user's correction (`userCategory`) are retained, so overrides persist without destroying the model's original judgement.
-- **Micro-commitment loop** — at the end of a session, Gemini extracts one small, concrete action for the next day. On a later calendar day the app surfaces a single non-intrusive check-in for the most recent outstanding commitment, records the response, and never asks twice.
-- **Weekly AI retrospective digests** — once enough reflections accumulate, Gemini synthesises the window into a structured digest: date range, recurring theme chips, mood-shift narrative, category distribution, gentle observations, and a closing encouragement. Digests persist to `users/{uid}/digests/{digestId}` and remain browsable.
-- **Cadence & emotional heatmap** — a calendar heatmap of journaling frequency coloured by each day's dominant mood, plus time-of-day pattern analysis, computed from the user's own entry history in their local timezone.
-- **Dear Future Me** — compose a letter, schedule it for a future date, and have it stay sealed until then. On unlock the letter is revealed with a Gemini-generated reflection question inviting comparison between who wrote it and who is reading it. Both the written date and arrival date are shown.
-- **Voice and video journaling** — dictate an entry via audio capture with server-side Gemini transcription, or record a video reflection for analysis, for days when typing is too much friction.
-- **Growing streak** — consecutive journaling days are represented as a growth metaphor rather than a bare counter, progressing through Ready to Bloom → Seedling Sprout → Flourishing Growth → Blooming Lotus → Deep-Rooted Tree.
-- **Ice-breaker starter prompts** — a large curated pool of introspective openers, three surfaced at a time with a shuffle that avoids repeats, occasionally supplemented by Gemini-generated prompts conditioned on recent entries. Collapsible so returning users aren't crowded, expanded by default for newcomers.
-- **PDF export** — export reflections as a formatted document.
-- **Optional location context** — opt-in reverse geocoding to give entries a sense of place, off by default and stored only with consent.
-
-### Experience
-
-- Draft sessions survive tab navigation and page reloads; in-flight Gemini responses continue generating in the background rather than being dropped when the user switches tabs.
-- Collapsible **Past Reflections** side drawer, grouped by Today / Yesterday / This Week / Earlier, with newest-first or oldest-first sorting.
-- Inline delete confirmation (avoids `window.confirm`, which is unreliable in sandboxed iframes).
-- Persistent dark mode, theme-matched scrollbars, and calm 200–300ms transitions throughout.
+</div>
 
 ---
 
-## 🛡️ Threat Modelling & Security Architecture
+## 🌿 Table of Contents
 
-| Threat Zone | Identified Risks | Countermeasures & Applied Controls |
-| :--- | :--- | :--- |
-| **Input Surfaces** | Malicious chat payloads, XSS in journal entries, oversized request bodies. | Express body limits (`50MB`, sized for audio/video payloads), React JSX output encoding, defensive payload sanitisation, structured prompt isolation. |
-| **Planning & Reasoning** | Prompt injection attempting to alter categorisation taxonomy or companion persona. | Isolated system instructions, structured output parsing with deterministic fallback heuristics, non-executable message boundaries. |
-| **Tool & API Execution** | API key leakage, unauthorised AI proxy usage, upstream model unavailability. | Server-side Gemini proxy (all eight client calls target first-party `/api/*` routes), resilient model fallback ladder (`gemini-3.6-flash` → `gemini-flash-latest`), null-safe error recovery. |
-| **Memory & State** | Cross-user data contamination, unauthorised reads or writes of other users' journals. | Owner-bound Firestore path isolation (`users/{userId}/…`) validated by security rules (`request.auth.uid == userId`), applied recursively to all subcollections. |
-| **Inter-System Communication** | Token interception, unauthorised database mutations. | HTTPS/TLS transport encryption, Firebase Auth JWT verification, client-side zero-secret architecture. |
-
----
-
-## 🏗️ Architecture
-
-```
-Client (React 19 + TypeScript + Vite + Tailwind)
-  │  Firebase Auth (Google Sign-In)  ──►  Firebase
-  │  Firestore SDK (owner-scoped reads/writes, enforced by rules)
-  │
-  └─ fetch /api/*  ──►  Express server (server.ts) on Cloud Run
-                          │  GEMINI_API_KEY from Secret Manager (server-only)
-                          └─ @google/genai  ──►  Gemini API
-```
-
-### Server routes
-
-| Route | Purpose |
-| :--- | :--- |
-| `GET /api/health` | Liveness probe. |
-| `POST /api/chat` | Multi-turn conversational journaling. |
-| `POST /api/session/summarize` | Summary, category assignment, and next-day commitment extraction. |
-| `POST /api/audio/transcribe` | Voice note transcription. |
-| `POST /api/video/analyze` | Video reflection analysis. |
-| `POST /api/prompts/generate` | Contextual prompt generation. |
-| `POST /api/letter/unlock-reflection` | Reflection question generated when a scheduled letter unlocks. |
-| `POST /api/digest/generate` | Weekly retrospective synthesis. |
-| `GET /api/geocode/reverse` | Opt-in reverse geocoding for location context. |
-
-### Firestore data model
-
-```
-users/{uid}
-  ├── entries/{entryId}
-  │     createdAt, messages[{role, text, timestamp}], summary,
-  │     aiCategory, userCategory, nextDayCommitment, commitmentCheckin
-  ├── digests/{digestId}
-  │     dateRange, title, themes[], moodShift, distribution, observations
-  └── letters/{letterId}
-        content, createdAt, scheduledDate, scheduledMillis, unlocked
-```
+- [Overview](#-overview)
+- [Key Features](#-key-features)
+  - [1. Conversational Reflection & Memory](#1-conversational-reflection--memory)
+  - [2. Multimodal Journaling: Voice & Video](#2-multimodal-journaling-voice--video)
+  - [3. Cadence Heatmap & Longitudinal Patterns](#3-cadence-heatmap--longitudinal-patterns)
+  - [4. Stillness Calm Space: Astronomy & Untangle](#4-stillness-calm-space-astronomy--untangle)
+  - [5. Dear Future Me (Time-Capsule Letters)](#5-dear-future-me-time-capsule-letters)
+  - [6. Sensory Experience & Ambient Sound Bed](#6-sensory-experience--ambient-sound-bed)
+  - [7. Mobile-First Adaptive Experience](#7-mobile-first-adaptive-experience)
+- [System Architecture](#-system-architecture)
+  - [High-Level Topology](#high-level-topology)
+  - [Backend API Route Matrix](#backend-api-route-matrix)
+  - [Firestore Document Schema](#firestore-document-schema)
+- [Security & Threat Architecture](#-security--threat-architecture)
+  - [Zero-Secret Client Hygiene](#zero-secret-client-hygiene)
+  - [Firestore Security Rules](#firestore-security-rules)
+  - [Model Fallback Ladder](#model-fallback-ladder)
+- [Getting Started](#-getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Local Development Setup](#local-development-setup)
+- [Production Deployment](#-production-deployment)
+  - [Secret Manager Configuration](#secret-manager-configuration)
+  - [Google Cloud Run Deployment](#google-cloud-run-deployment)
+- [Verification & Testing Guide](#-verification--testing-guide)
+- [Tech Stack](#-tech-stack)
 
 ---
 
-## 📋 Prerequisites
+## 📖 Overview
 
-- **Google Cloud Project** with billing enabled
-- **Google Cloud SDK** (`gcloud` CLI), installed and authenticated
-- **Node.js** v20+ and npm
-- **Firebase CLI** (`npm install -g firebase-tools`)
+**Reflect** is designed from the ground up as a private sanctuary for daily thought, not a standard chatbot. It provides an unhurried, empathetic space where users can untangle feelings, build self-awareness, and capture personal growth over time.
 
-Enable the required APIs:
+- **Non-Clinical Companion Persona**: Gemini responds with mindful inquiry and gentle reflections rather than prescriptive advice, diagnostic language, or unsolicited action plans.
+- **Durable Cloud Persistence**: Every thought, session, weekly retrospective, and letter is secured in Google Cloud Firestore under owner-isolated security rules.
+- **Privacy First**: Zero third-party telemetry, zero client-exposed API keys, and fully opt-in multimedia/geolocation features.
 
-```bash
-gcloud services enable \
-  run.googleapis.com \
-  secretmanager.googleapis.com \
-  firestore.googleapis.com \
-  cloudbuild.googleapis.com
+---
+
+## ✨ Key Features
+
+### 1. Conversational Reflection & Memory
+* **Multi-Turn Contextual Dialog**: Chat naturally with Gemini as your reflective sounding board. The model holds conversational continuity within a session, acknowledging subtleties and asking meaningful open-ended questions.
+* **Smart Emotional Categorization**: When saving a reflection, Gemini categorizes the entry into one of seven emotional themes:
+  * 🌿 **Gratitude** (Emerald) — Appreciation, contentment, thankfulness
+  * 🍊 **Stress** (Orange) — Pressure, overwhelm, tension
+  * 🌊 **Reflection** (Royal Blue) — Introspection, understanding, self-discovery
+  * ☀️ **Excitement** (Amber) — Joy, anticipation, high energy
+  * 🧭 **Problem-Solving** (Teal) — Clarity, decisions, analytical thinking
+  * 🌸 **Sadness** (Rose) — Grief, vulnerability, melancholy
+  * 🕊️ **Neutral** (Zinc) — General observations, daily logs, balanced thoughts
+* **Dual-Track Category Retention**: Both `aiCategory` (Gemini's initial classification) and `userCategory` (the user's manual correction) are saved, allowing users to override labels without erasing the original AI insight.
+* **Next-Day Micro-Commitment Loop**: Gemini extracts one realistic, bite-sized intention for tomorrow. On the subsequent calendar day, a gentle check-in banner appears (*"Did you get a chance to take a 10-minute walk?"*) with one-tap confirmation that marks it done.
+* **Ice-Breaker Starters**: A randomized pool of 40+ introspective prompts with shuffle mechanics that prevent repeats within a session, augmented asynchronously with contextual prompts generated by Gemini.
+* **Session Resilience**: Active drafts survive tab navigation and browser refreshes (`sessionStorage`). In-flight Gemini generation continues running smoothly in the background when switching views.
+* **Expandable History Drawer**: Browse past reflections grouped into *Today*, *Yesterday*, *This Week*, and *Earlier*, with chronological sorting, full-text reading, and inline non-blocking deletion.
+* **Print-Ready PDF Archiving**: Export single or bulk reflections as cleanly formatted typography documents suitable for physical printing or offline archiving.
+
+### 2. Multimodal Journaling: Voice & Video
+* **Voice Dictation & Transcription**: Capture stream-of-consciousness thoughts through the microphone. Features a live canvas audio waveform visualizer and server-side transcription using Gemini, returning transcribed text, emotional tone summaries, and sentiment tags.
+* **Video Notes**: Record short video journal entries with front/back camera toggling. Gemini processes your spoken thoughts and reflection tone to generate emotional insights and summaries directly alongside your entries.
+* **Opt-In Geocoding**: Tag reflections with human-readable location names (e.g., *"Kyoto, Japan"*) via OpenStreetMap Nominatim reverse geocoding, requiring explicit permission.
+
+### 3. Cadence Heatmap & Longitudinal Patterns
+* **Interactive Frequency Heatmap**: Visualizes annual and monthly journaling cadence, color-coded by the dominant emotional category of each day.
+* **Diurnal Rhythm Breakdown**: Dissects reflection habits across four diurnal periods:
+  * 🌅 **Morning** (6am – 12pm)
+  * ☀️ **Afternoon** (12pm – 6pm)
+  * 🌆 **Evening** (6pm – 11pm)
+  * 🌙 **Night** (11pm – 6am)
+* **Weekly AI Retrospective Digests**: Once a week (or upon request when entries accumulate), Gemini synthesizes reflections into a structured digest featuring:
+  * Poetic title capturing the week's essence
+  * Dominant themes chips
+  * Emotional journey narrative
+  * Category distribution percentage breakdown
+  * Gentle, non-judgmental observations
+  * Closing affirmation and encouragement
+
+### 4. Stillness Calm Space: Astronomy & Untangle
+* **Authentic Constellation Tracing**: Select from 14 real astronomical constellations (Orion, Ursa Major, Cassiopeia, Cygnus, Scorpius, etc.). Tap or drag between genuine star coordinates in a peaceful night sky. Correct connections lock with a radiant glow; incorrect attempts dissolve gently without buzzers, timers, or error penalties.
+* **Astronomical Lore & Myth**: Upon completing a constellation, Gemini provides a warm, authentic cultural and astronomical narrative describing the constellation's history, notable stars, and sky visibility.
+* **Free Sky Mode**: An unguided star canvas allowing users to place stars, draw celestial connections, and create custom constellations without rules or scores.
+* **Planar Graph Untangling**: A tranquil physics-based node puzzle where intersecting lines softly glow amber and resolve to emerald as lines are disentangled.
+* **Gentle Stress Referral**: When an entry is classified as *Stress* or *Sadness*, a gentle dismissible banner offers an invitation to decompress in the Stillness space.
+
+### 5. Dear Future Me (Time-Capsule Letters)
+* **Sealed Future Delivery**: Write letters to your future self and schedule them for 1 month, 3 months, 6 months, 1 year, or a custom target date.
+* **Lock State**: Letters remain sealed in Cloud Firestore until the designated date arrives, displaying a gentle countdown.
+* **Unlock Ceremony & Reflection Prompt**: Once unlocked, letters reveal the original composition alongside a Gemini-generated introspection question comparing who wrote the letter to who is reading it.
+
+### 6. Sensory Experience & Ambient Sound Bed
+* **In-Browser Web Audio Synthesizer**: Generates a soft, non-melodic filtered pink/brown noise bed layered with dual grounding sine hums at harmonic frequencies (108 Hz & 162 Hz).
+* **Context-Aware Acoustic Filtering**: Automatically shifts its filter cutoff frequency higher (~380 Hz) in the Stillness space for an ethereal atmosphere, settling into a warmer tone (~250 Hz) during journaling.
+* **Smooth Fades & Zero Assets**: Completely synthesized in real time via the Web Audio API without downloading bulky MP3 files. Includes an unobtrusive volume slider and persistent toggle state.
+* **Mindful Avatar System**: Choose from 6 custom zen avatars (*Zen Lotus*, *Crescent Moon*, *Inner Compass*, *Mountain Peak*, *Gentle Wave*, *Quiet Flame*) or your Google profile photo, synchronized across the header, chat messages, and settings.
+* **Growing Streak Metaphor**: Celebrates habit formation with an organic growth ladder:
+  * 0 Days: *Ready to Bloom* 🌱
+  * 1–2 Days: *Seedling Sprout* 🌿
+  * 3–6 Days: *Flourishing Growth* 🌸
+  * 7–13 Days: *Blooming Lotus* 🪷
+  * 14+ Days: *Deep-Rooted Tree* 🌳
+
+### 7. Mobile-First Adaptive Experience
+* **Fixed Bottom Navigation Bar**: On mobile viewports (<768px), navigation transitions to a persistent, thumb-friendly bottom bar with equal-width touch targets for *My Space*, *Patterns*, *Future Me*, and *Stillness*, complete with safe-area padding.
+* **Adaptive Single-Line Composer**: Textarea auto-grows dynamically with input while maintaining a clean single-line profile at rest without internal scrollbars. Secondary multimodal tools collapse into a compact `+` menu on narrow screens.
+* **Warm Obsidian & Cream Palette**: High-contrast, WCAG AA-compliant light mode with warm stone neutrals, paired with an eye-safe dark mode.
+
+---
+
+## 🏗️ System Architecture
+
+### High-Level Topology
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      CLIENT (Browser / Mobile PWA)                       │
+│  React 19 + TypeScript + Vite 6 + Tailwind CSS 4 + Motion + Lucide     │
+│                                                                         │
+│   ┌───────────────────────────┐      ┌───────────────────────────────┐  │
+│   │   Firebase Auth (GSI)     │      │   Web Audio Synthesizer       │  │
+│   │   Google Popup Sign-In    │      │   Pink/Brown Noise + Sine     │  │
+│   └─────────────┬─────────────┘      └───────────────────────────────┘  │
+└─────────────────┼───────────────────────────────────┬───────────────────┘
+                  │ Identity JWT                      │
+                  ▼                                   ▼
+┌───────────────────────────────────┐    ┌────────────────────────────────┐
+│      Cloud Firestore (GCP)        │    │  Express Full-Stack Server     │
+│                                   │    │  Cloud Run (Port 3000)         │
+│  Owner-Bound Path Isolation:      │    │                                │
+│  users/{uid}/entries/{entryId}    │    │  • Multi-turn Dialog Proxy     │
+│  users/{uid}/digests/{digestId}   │    │  • Audio/Video Transcribe      │
+│  users/{uid}/letters/{letterId}   │    │  • Reverse Geocode Proxy       │
+│  users/{uid}/settings             │    │  • Constellation Lore Engine   │
+│                                   │    └───────────────┬────────────────┘
+│  Enforced via firestore.rules     │                    │ Server-Side Secret
+└───────────────────────────────────┘                    ▼
+                                         ┌────────────────────────────────┐
+                                         │       Gemini 3.8 / 3.6 API     │
+                                         │       @google/genai SDK        │
+                                         └────────────────────────────────┘
+```
+
+### Backend API Route Matrix
+
+All AI and external requests route through the Express server to prevent API key exposure and apply payload validation.
+
+| Method | Route | Description | Primary Payload |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/health` | Liveness and readiness probe for container orchestrator | None |
+| `POST` | `/api/chat` | Multi-turn conversational companion response | `{ messages, userContext }` |
+| `POST` | `/api/session/summarize` | Summarizes reflection, assigns emotional category, extracts commitment | `{ transcript }` |
+| `POST` | `/api/audio/transcribe` | Transcribes audio recording with emotion tags and sentiment analysis | `{ audioBase64, mimeType }` |
+| `POST` | `/api/video/analyze` | Analyzes video note keyframes and audio for spoken thoughts and mood | `{ frames, audioData, mimeType }` |
+| `POST` | `/api/letter/unlock-reflection` | Generates comparative introspective question for unlocked letter | `{ letterContent, createdDate }` |
+| `POST` | `/api/constellation/lore` | Generates rich astronomical and cultural narrative for completed constellation | `{ constellationName, stars }` |
+| `POST` | `/api/constellation/name` | Suggests poetic celestial name for freeform sky drawing | `{ stars, connections }` |
+| `POST` | `/api/digest/generate` | Synthesizes accumulated entries into a weekly retrospective digest | `{ entries[] }` |
+| `POST` | `/api/prompts/generate` | Generates personalized journaling prompts based on recent themes | `{ recentCategories[] }` |
+| `GET` | `/api/geocode/reverse` | Reverse geocodes coordinates via OpenStreetMap Nominatim | `?lat={lat}&lon={lon}` |
+
+### Firestore Document Schema
+
+```
+databases/(default)/documents
+└── users/{userId}
+    ├── settings/preferences
+    │     ├── theme: "light" | "dark" | "system"
+    │     ├── customAvatar: "default" | "lotus" | "moon" | "compass" | ...
+    │     ├── locationEnabled: boolean
+    │     ├── ambientSoundEnabled: boolean
+    │     └── dailyCheckinsEnabled: boolean
+    │
+    ├── entries/{entryId}
+    │     ├── createdAt: Timestamp
+    │     ├── createdAtMillis: number
+    │     ├── summary: string
+    │     ├── aiCategory: EmotionalCategory
+    │     ├── userCategory: EmotionalCategory | null
+    │     ├── messages: Array<{ role: 'user' | 'assistant', text: string, timestamp: number }>
+    │     ├── locationTag: string | null
+    │     ├── nextDayCommitment: string | null
+    │     ├── commitmentCheckin: { status: 'completed' | 'not_yet' | 'skipped', date: string } | null
+    │     └── multimedia: { type: 'audio' | 'video', summary: string } | null
+    │
+    ├── digests/{digestId}
+    │     ├── createdAt: Timestamp
+    │     ├── createdAtMillis: number
+    │     ├── title: string
+    │     ├── dateRange: { startDate: string, endDate: string, startMillis: number, endMillis: number }
+    │     ├── entryCount: number
+    │     ├── themes: string[]
+    │     ├── moodShift: string
+    │     ├── distribution: Record<EmotionalCategory, number>
+    │     ├── observations: string[]
+    │     └── closingAffirmation: string
+    │
+    └── letters/{letterId}
+          ├── createdAt: Timestamp
+          ├── createdAtMillis: number
+          ├── scheduledDate: string
+          ├── scheduledMillis: number
+          ├── content: string
+          ├── unlocked: boolean
+          └── reflectionQuestion: string | null
 ```
 
 ---
 
-## 🔑 Secret Management Setup
+## 🛡️ Security & Threat Architecture
 
-The `GEMINI_API_KEY` is never hardcoded or exposed to the client. It is stored in Google Cloud Secret Manager and bound to the Cloud Run service at runtime.
+### Zero-Secret Client Hygiene
+- **Strict Server Proxying**: `GEMINI_API_KEY` is loaded strictly on the Node.js server via `process.env.GEMINI_API_KEY` or Google Cloud Secret Manager. No client build bundle (`dist/`) contains any secret keys.
+- **Defensive Request Boundaries**: Express enforces strict 50MB payload limits for multimodal requests and structured JSON schema validation.
+- **Client Sanitization**: All user inputs are rendered through React JSX escaping to eliminate XSS risks.
 
-```bash
-# 1. Create and populate the secret
-gcloud secrets create GEMINI_API_KEY --replication-policy="automatic"
-echo -n "YOUR_GEMINI_API_KEY_HERE" | gcloud secrets versions add GEMINI_API_KEY --data-file=-
-
-# 2. Grant the Cloud Run service account read access
-PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format="value(projectNumber)")
-
-gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
-```
-
----
-
-## 🔒 Cloud Firestore Security Rules
+### Firestore Security Rules
+All read and write access is locked to the authenticated owner. Subcollections inherit this isolation via recursive matching:
 
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // User data isolation: only the authenticated owner may read or modify their documents
+    // User data isolation: only authenticated owner can read or write
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
 
@@ -148,20 +258,90 @@ service cloud.firestore {
 }
 ```
 
-The recursive `{allSubcollections=**}` match extends owner-binding to `entries`, `digests`, and `letters`, so no subcollection can be reached by a non-owner even if a client attempted a direct path read.
+### Model Fallback Ladder
+To ensure uninterrupted journaling even during API rate limits or regional quotas, the backend implements a resilient fallback ladder:
 
-Deploy:
-
-```bash
-firebase deploy --only firestore:rules
 ```
+gemini-3.8-flash  ──►  gemini-3.6-flash  ──►  gemini-flash-latest  ──►  gemini-3.1-flash-lite
+                                                                                │
+                                           Offline Mindful Companion ◄──────────┘
+```
+
+If upstream network connectivity fails completely, an internal mindful companion engine steps in gracefully to preserve the user's reflection without throwing blocking errors.
 
 ---
 
-## 🚀 Cloud Run Deployment
+## 🚀 Getting Started
+
+### Prerequisites
+* **Node.js**: v20.0.0 or higher
+* **npm**: v10.0.0 or higher
+* **Google Cloud Project**: With Billing and Firestore enabled
+* **Gemini API Key**: From [Google AI Studio](https://aistudio.google.com/)
+
+### Local Development Setup
+
+1. **Clone the Repository**
+   ```bash
+   git clone https://github.com/your-username/reflect.git
+   cd reflect
+   ```
+
+2. **Install Dependencies**
+   ```bash
+   npm install
+   ```
+
+3. **Configure Environment Variables**
+   Create a `.env` file in the project root:
+   ```env
+   # Server Secrets
+   GEMINI_API_KEY=your_gemini_api_key_here
+   PORT=3000
+   NODE_ENV=development
+
+   # Client Firebase Configuration (Safe for browser)
+   VITE_FIREBASE_API_KEY=your_firebase_api_key
+   VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+   VITE_FIREBASE_PROJECT_ID=your_project_id
+   VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
+   VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+   VITE_FIREBASE_APP_ID=your_app_id
+   ```
+
+4. **Start the Development Server**
+   ```bash
+   npm run dev
+   ```
+   Open your browser to `http://localhost:3000`.
+
+---
+
+## 📦 Production Deployment
+
+### Secret Manager Configuration
+
+Store the `GEMINI_API_KEY` securely in Google Cloud Secret Manager:
 
 ```bash
-gcloud run deploy reflect-app \
+# 1. Create and populate the secret
+gcloud secrets create GEMINI_API_KEY --replication-policy="automatic"
+echo -n "YOUR_GEMINI_API_KEY" | gcloud secrets versions add GEMINI_API_KEY --data-file=-
+
+# 2. Grant the Cloud Run compute service account access
+PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format="value(projectNumber)")
+
+gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+### Google Cloud Run Deployment
+
+Deploy the containerized full-stack application directly using Cloud Build:
+
+```bash
+gcloud run deploy reflect \
   --source . \
   --region us-central1 \
   --allow-unauthenticated \
@@ -169,62 +349,56 @@ gcloud run deploy reflect-app \
   --set-env-vars NODE_ENV=production
 ```
 
-### Verification label
-
+Deploy Firestore Security Rules:
 ```bash
-gcloud run services update reflect-app \
-  --update-labels=dev-tutorial=cloud-run-ai-challenge \
-  --region=us-central1
+firebase deploy --only firestore:rules
 ```
 
 ---
 
-## 🧪 Functional Walkthrough & Test Guide
+## 🧪 Verification & Testing Guide
 
-**1. Unauthenticated landing & Google Sign-In**
-Open the application URL without an active session. A minimal landing page shows the app name, a one-line tagline, and a single "Sign in with Google" button. Completing the popup transitions to the private dashboard with the user's name, avatar, streak indicator, and tabs.
-
-**2. Greeting & starter prompts**
-On **My Space**, a personalised greeting appears with a rotating supportive line and three starter prompt chips. Shuffle rotates to three new prompts without repeating within the session. Tapping a prompt pre-fills the composer for editing. The block collapses via its chevron and remembers that preference.
-
-**3. Multi-turn conversational journaling**
-Send a message. It renders right-aligned, a thinking indicator appears, and Gemini replies with an empathetic reflection and follow-up. Context is preserved across several turns.
-
-**4. Voice journaling**
-Tap the microphone in the composer. Recording state is visually indicated; audio is transcribed server-side and appended into the composer for editing before sending. Unsupported browsers show a clear disabled state rather than failing silently.
-
-**5. Save & end session with auto-categorisation**
-Click **Save & End Session**. The session is summarised, assigned a category, and persisted to `users/{uid}/entries/{entryId}`. Gemini also extracts a next-day micro-commitment where one naturally arises. The composer resets.
-
-**6. Category override**
-In **Past Reflections**, tap an entry's category chip and select a different mood. The chip updates immediately and persists as `userCategory` while `aiCategory` is preserved.
-
-**7. History drawer, sorting, and deletion**
-Open the **Past Reflections** drawer. Entries are grouped under Today / Yesterday / This Week / Earlier, each showing its own creation time, category chip, and summary. Sorting toggles between newest-first and oldest-first. Tapping expands the full read-only transcript. Delete prompts an inline confirmation before removing the document from Firestore.
-
-**8. Draft persistence & uninterrupted generation**
-Start a conversation, then switch to **Patterns** or **Dear Future Me** and return, or reload the tab. The in-progress draft is preserved. A Gemini response still generating when you navigate away continues in the background and is intact on return.
-
-**9. Micro-commitment check-in**
-On a later calendar day, a slim dismissible banner surfaces the most recent outstanding commitment with quick-tap responses. Once answered or dismissed it is recorded and not shown again.
-
-**10. Dark mode**
-Toggle in the header switches the entire interface between light and dark palettes. The preference persists across reloads.
-
-**11. Weekly retrospective**
-On **Patterns**, view progress toward the next digest and generate one when eligible. Gemini produces a titled digest with themes, mood-shift narrative, category distribution, observations, and a closing note, saved to `users/{uid}/digests/{digestId}` and listed in reverse-chronological order.
-
-**12. Cadence & emotional heatmap**
-Below the retrospectives, a calendar heatmap shows journaling frequency coloured by each day's dominant mood, alongside time-of-day pattern analysis. Sparse histories show a friendly encouragement rather than an empty grid.
-
-**13. Dear Future Me**
-Compose a letter and schedule it for a future date. Sealed letters list their unlock date with content hidden. On or after the scheduled date, the letter unlocks with a distinct reveal, shows both its written and arrival dates, and is accompanied by a Gemini-generated reflection question.
-
-**14. Cross-user isolation**
-Sign in with a second Google account in a separate browser profile. Create entries on both. Neither account can see the other's entries, digests, or letters — enforced by security rules, not merely hidden in the UI.
+| # | Test Scenario | Steps & Verification |
+| :-: | :--- | :--- |
+| **1** | **Authentication** | Click **Sign in with Google**. Authenticate via popup. Verify profile avatar, streak counter, and tabs render immediately. |
+| **2** | **Starter Prompts** | Tap **Shuffle** on the prompt cards. Verify three new questions display without repeats. Click a card to pre-fill the composer. |
+| **3** | **Conversational Dialog** | Send a reflection. Verify thinking indicator appears and Gemini replies empathetically. Send follow-up messages to verify context continuity. |
+| **4** | **Voice Dictation** | Click the microphone icon. Speak a thought. Verify the waveform animates and transcribed text appears in the composer. |
+| **5** | **Save & Auto-Categorization** | Click **Save & End Session**. Verify summary and category badge are assigned and the session resets. |
+| **6** | **Category Override** | Open **Past Reflections**, tap the category chip, and change the mood. Verify the color updates and persists to Firestore. |
+| **7** | **Micro-Commitment Loop** | Mention a goal for tomorrow in a reflection. Save the session. Revisit on a subsequent day to verify the check-in banner appears. |
+| **8** | **Draft Persistence** | Start typing an entry, navigate to *Patterns* or *Stillness*, then return. Verify draft text and messages remain intact. |
+| **9** | **Cadence Heatmap** | Navigate to **Patterns**. Verify reflection activity displays across calendar days with category color coding and diurnal cards. |
+| **10** | **Retrospective Digest** | In **Patterns**, click **Generate Retrospective**. Verify Gemini generates a titled retrospective with themes and observations. |
+| **11** | **Constellation Tracing** | Navigate to **Stillness** → **Constellation**. Trace star threads. Verify correct paths illuminate and completion reveals lore. |
+| **12** | **Untangle Mode** | In **Stillness**, select **Untangle**. Drag nodes until lines no longer cross. Verify lines transition from amber to emerald. |
+| **13** | **Dear Future Me** | Navigate to **Future Me**. Write a letter and schedule delivery. Verify the letter is sealed with countdown intact. |
+| **14** | **Ambient Sound Bed** | Click the speaker icon in the header. Verify the ambient noise bed fades in smoothly and adjusts volume without clicks. |
+| **15** | **Dark Mode** | Click the sun/moon icon. Verify all components transition smoothly between warm light and dark palettes with state persistence. |
+| **16** | **Data Isolation** | Sign in with a different Google account. Verify zero access to the previous user's reflections, digests, or letters. |
 
 ---
 
 ## 🧰 Tech Stack
 
-React 19 · TypeScript · Vite 6 · Tailwind CSS 4 · Motion · Lucide · Express 4 · `@google/genai` · Firebase Auth · Cloud Firestore · Cloud Run · Secret Manager · Gemini API
+| Domain | Technology | Version | Purpose |
+| :--- | :--- | :--- | :--- |
+| **Frontend Framework** | React | 19.0.1 | Reactive component architecture & state hooks |
+| **Language** | TypeScript | 5.8.2 | Strict type safety across client and server |
+| **Build & Dev Tool** | Vite | 6.2.3 | Instant HMR and optimized production bundling |
+| **Styling & Design** | Tailwind CSS | 4.1.14 | Modern utility-first CSS design system |
+| **Animations** | Motion | 12.23.24 | Smooth micro-interactions and transitions |
+| **Icons** | Lucide React | 0.546.0 | Minimalist iconography |
+| **Backend Server** | Express | 4.21.2 | Full-stack API proxy and static asset serving |
+| **Server Runtime** | Node.js / tsx | 22.x / 4.21.0 | Fast server execution and bundling |
+| **AI SDK** | `@google/genai` | 2.4.0 | Official Google GenAI TypeScript SDK |
+| **Authentication** | Firebase Auth | 12.18.0 | Secure client-side Google OAuth popup login |
+| **Database** | Cloud Firestore | 12.18.0 | Real-time NoSQL cloud document storage |
+| **Cloud Hosting** | Google Cloud Run | Managed | Fully managed serverless container runtime |
+| **Secret Storage** | Secret Manager | Managed | Secure server-side credential management |
+
+---
+
+<div align="center">
+  <sub>Reflect · Built with care for mindful, private, and intentional self-reflection.</sub>
+</div>

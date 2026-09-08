@@ -238,7 +238,7 @@ export function useVideoRecorder({
 
       if (isPermissionDenied) {
         console.warn('Camera or microphone permission was denied by user or browser:', err?.message || err);
-        setVideoError('Camera permission was denied. Please allow camera and microphone access in your browser site permissions to record video reflections.');
+        setVideoError('Camera permission was denied. Please allow camera and microphone access in your browser site permissions to record video notes.');
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
         console.warn('No camera or microphone detected on device:', err?.message || err);
         setVideoError('No camera detected on your device. Please check your camera connection.');
@@ -427,7 +427,7 @@ export function useVideoRecorder({
         reader.readAsDataURL(blob);
       });
 
-      setAnalysisStep('Gemini analyzing facial expressions, tone, and speech...');
+      setAnalysisStep('Reflecting on spoken thoughts and video note...');
 
       // Ensure at least 1 frame is present
       const frames = capturedFramesRef.current.length > 0
@@ -465,7 +465,7 @@ export function useVideoRecorder({
       onAnalysisComplete(data, false);
     } catch (err: any) {
       console.error('Video mood analysis error:', err);
-      setVideoError(err.message || 'Failed to analyze video reflection. Please try again.');
+      setVideoError(err.message || 'Failed to analyze video note. Please try again.');
     } finally {
       setIsAnalyzing(false);
       setAnalysisStep('');
@@ -602,10 +602,10 @@ export const VideoRecorderStudio: React.FC<VideoRecorderStudioProps> = ({
               </div>
               <div>
                 <h4 className="text-xs font-semibold text-[#3A3A35] dark:text-[#EDEAE2]">
-                  Video Reflection & Mood Analysis
+                  Video Note Reflection
                 </h4>
                 <p className="text-[11px] text-[#858376] dark:text-[#8E8C7F]">
-                  Multimodal speech, facial expression, and tone breakdown
+                  Spoken thoughts, tone, and visual reflection breakdown
                 </p>
               </div>
             </div>
@@ -626,7 +626,7 @@ export const VideoRecorderStudio: React.FC<VideoRecorderStudioProps> = ({
               <div className="sm:col-span-4 rounded-xl overflow-hidden border border-[#E6E4DD] dark:border-[#2E2C26] bg-[#141310] relative group aspect-video sm:aspect-square flex items-center justify-center">
                 <img
                   src={lastResult.videoThumbnail}
-                  alt="Video reflection snapshot"
+                  alt="Video note snapshot"
                   className="w-full h-full object-cover"
                 />
                 <div className="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur-xs text-[10px] text-white flex items-center gap-1">
@@ -761,9 +761,9 @@ export const VideoRecorderStudio: React.FC<VideoRecorderStudioProps> = ({
               </div>
               <span className="text-xs font-semibold tracking-wide">
                 {isRecording
-                  ? 'RECORDING VIDEO REFLECTION'
+                  ? 'RECORDING VIDEO NOTE'
                   : isAnalyzing
-                  ? 'ANALYZING WITH GEMINI'
+                  ? 'REFLECTING WITH GEMINI'
                   : 'CAMERA READY'}
               </span>
             </div>
@@ -785,7 +785,7 @@ export const VideoRecorderStudio: React.FC<VideoRecorderStudioProps> = ({
                 onClick={closeCamera}
                 disabled={isRecording || isAnalyzing}
                 className="p-1 rounded-lg text-[#8E8C7F] hover:text-white hover:bg-[#2A2923] transition-colors cursor-pointer disabled:opacity-40"
-                title="Close camera studio"
+                title="Close video note"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -824,10 +824,10 @@ export const VideoRecorderStudio: React.FC<VideoRecorderStudioProps> = ({
                 </div>
                 <div className="space-y-1">
                   <h4 className="text-sm font-semibold text-white">
-                    Analyzing Video Reflection
+                    Reflecting on Video Note
                   </h4>
                   <p className="text-xs text-[#A6A498] max-w-sm font-sans">
-                    {analysisStep || 'Gemini is processing your speech, visual demeanor, and emotional energy...'}
+                    {analysisStep || 'Gemini is reflecting on your spoken thoughts and video note...'}
                   </p>
                 </div>
                 <div className="w-48 h-1 bg-[#2E2C26] rounded-full overflow-hidden">
@@ -864,7 +864,7 @@ export const VideoRecorderStudio: React.FC<VideoRecorderStudioProps> = ({
               {isRecording ? (
                 <span>Speak naturally into your camera. Tap Stop when finished.</span>
               ) : (
-                <span>Record a video reflection to analyze spoken thoughts and visual mood.</span>
+                <span>Record a short video reflection for your journal.</span>
               )}
             </div>
 
@@ -910,7 +910,7 @@ export const VideoRecorderStudio: React.FC<VideoRecorderStudioProps> = ({
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 active:scale-98 text-white text-xs font-semibold shadow-md transition-all cursor-pointer"
                 >
                   <Square className="w-3.5 h-3.5 fill-current" />
-                  <span>Stop & Analyze Mood</span>
+                  <span>Stop & Save Note</span>
                 </button>
               )}
             </div>
@@ -949,14 +949,14 @@ export const VideoRecordButton: React.FC<VideoRecordButtonProps> = ({
       } disabled:opacity-40 disabled:cursor-not-allowed`}
       title={
         isRecording
-          ? 'Recording video reflection...'
+          ? 'Recording video note...'
           : isOpen
-          ? 'Close video studio'
+          ? 'Close video note'
           : isAnalyzing
-          ? 'Analyzing video mood and speech with Gemini...'
-          : 'Record video reflection with facial mood & speech analysis'
+          ? 'Reflecting on video note...'
+          : 'Record a short video reflection'
       }
-      aria-label={isOpen ? 'Close camera' : 'Record video reflection'}
+      aria-label={isOpen ? 'Close video note' : 'Record a short video reflection'}
     >
       <Video className={`w-4 h-4 ${isRecording ? 'animate-bounce' : ''}`} />
       {isRecording && (
