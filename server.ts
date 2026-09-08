@@ -21,15 +21,24 @@ function getAIClient(): GoogleGenAI {
     if (!apiKey) {
       console.warn('GEMINI_API_KEY is not set. AI requests will fail until configured.');
     }
-    aiClient = new GoogleGenAI({ apiKey: apiKey || '' });
+    aiClient = new GoogleGenAI({
+      apiKey: apiKey || '',
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
   }
   return aiClient;
 }
 
 // Resilient Model Fallback Ladder
 const MODEL_FALLBACK_LADDER = [
+  'gemini-3.8-flash',
   'gemini-3.6-flash',
   'gemini-flash-latest',
+  'gemini-3.1-flash-lite',
 ];
 
 interface FallbackOptions {
@@ -60,24 +69,38 @@ async function generateContentWithFallback(options: FallbackOptions): Promise<{ 
       const errMsg = err?.message || String(err);
       const statusCode = err?.status || err?.statusCode || (err?.error && err?.error?.code);
       
-      console.warn(`[Gemini Fallback] Model '${model}' unavailable (status: ${statusCode || 'n/a'}), falling back to next model.`);
-
-      // If error indicates rate limiting, quota exhaustion, or temporary unavailability, continue to next model in ladder
       const isRecoverable =
         statusCode === 429 ||
         statusCode === 503 ||
         statusCode === 500 ||
         statusCode === 404 ||
+        statusCode === 403 ||
         errMsg.includes('429') ||
+        errMsg.includes('404') ||
         errMsg.includes('RESOURCE_EXHAUSTED') ||
         errMsg.includes('UNAVAILABLE') ||
         errMsg.includes('quota') ||
-        errMsg.includes('exceeded');
+        errMsg.includes('exceeded') ||
+        errMsg.includes('no longer available');
+
+      // If project prepayment credits are depleted, subsequent models on the same project will also fail
+      const isDepleted = errMsg.includes('prepayment credits are depleted') || errMsg.includes('depleted') || errMsg.includes('prepay');
+      if (isDepleted) {
+        console.log(`[Gemini API] Prepayment credits depleted on project for model '${model}'.`);
+        break;
+      }
+
+      console.log(`[Gemini Fallback] Model '${model}' unavailable (status: ${statusCode || 'n/a'}), checking next model.`);
 
       if (isRecoverable) {
         continue;
       }
     }
+  }
+
+  const isPrepaymentDepleted = String(lastError?.message || '').includes('depleted') || String(lastError?.message || '').includes('prepayment');
+  if (isPrepaymentDepleted) {
+    throw new Error('Prepayment credits are depleted on this project.');
   }
 
   throw new Error(`All Gemini models in fallback ladder failed. Last error: ${lastError?.message || 'Unknown error'}`);
@@ -123,9 +146,16 @@ Tone & Style Principles:
 
     res.json({ reply: text, modelUsed });
   } catch (error: any) {
-    console.error('Error in /api/chat:', error);
-    res.status(500).json({
-      error: error?.message || 'Failed to generate thoughtful reflection from Gemini.',
+    const isCreditsDepleted = String(error?.message).includes('depleted') || String(error?.message).includes('prepayment');
+    console.log('[Chat API] Companion fallback active:', isCreditsDepleted ? 'Prepayment credits depleted' : error?.message);
+    res.json({
+      reply: isCreditsDepleted
+        ? "I am holding space for your reflection. While the workspace Gemini API credits are currently depleted, your words and insights are safely preserved here. What else is on your mind?"
+        : "I'm listening and holding space for your thoughts. While the AI reflection service is temporarily resting, your words and insights are safely preserved here. What else is on your mind?",
+      modelUsed: 'offline-mindful-companion',
+      isFallback: true,
+      creditsDepleted: isCreditsDepleted,
+      error: error?.message,
     });
   }
 });
@@ -135,6 +165,7 @@ app.post('/api/session/summarize', async (req: Request, res: Response) => {
   try {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const messages = Array.isArray(body.messages) ? body.messages : [];
+    const extractCommitment = body.extractCommitment !== false;
 
     if (messages.length === 0) {
       res.status(400).json({ error: 'Messages array is required for session summary.' });
@@ -146,7 +177,8 @@ app.post('/api/session/summarize', async (req: Request, res: Response) => {
       .map((m: any) => `${m.role === 'user' ? 'User' : 'Journal Companion'}: ${m.text}`)
       .join('\n\n');
 
-    const prompt = `Analyze this personal journal conversation session:
+    const prompt = extractCommitment
+      ? `Analyze this personal journal conversation session:
 
 ${transcript}
 
@@ -167,6 +199,26 @@ Respond ONLY with valid JSON in this exact structure, with no extra commentary o
   "summary": "...",
   "category": "...",
   "nextDayCommitment": "..." or null
+}`
+      : `Analyze this personal journal conversation session:
+
+${transcript}
+
+Tasks:
+1. Provide a concise, meaningful one-line summary (maximum 15 words) that captures the core essence of this reflection.
+2. Select EXACTLY ONE category from this fixed set that best describes the dominant theme or mood:
+   - "Gratitude"
+   - "Stress"
+   - "Reflection"
+   - "Excitement"
+   - "Problem-Solving"
+   - "Sadness"
+   - "Neutral"
+
+Respond ONLY with valid JSON in this exact structure, with no extra commentary or markdown formatting:
+{
+  "summary": "...",
+  "category": "..."
 }`;
 
     const { text, modelUsed } = await generateContentWithFallback({
@@ -215,14 +267,13 @@ Respond ONLY with valid JSON in this exact structure, with no extra commentary o
       modelUsed,
     });
   } catch (error: any) {
-    console.error('Error in /api/session/summarize:', error);
-    res.status(500).json({
-      error: error?.message || 'Failed to summarize journal session.',
-      fallback: {
-        summary: 'Mindful journaling session',
-        category: 'Reflection',
-        nextDayCommitment: null,
-      },
+    console.log('[Session Summarize API] Heuristic fallback active:', error?.message);
+    res.json({
+      summary: 'Mindful journaling reflection',
+      category: 'Reflection',
+      nextDayCommitment: null,
+      modelUsed: 'heuristic-fallback',
+      isFallback: true,
     });
   }
 });
@@ -328,7 +379,7 @@ Respond ONLY with valid JSON in this exact structure, with no extra commentary o
         result.emotionalSummary = parsed.emotionalSummary.trim();
       }
     } catch (parseErr) {
-      console.warn('Failed to parse audio transcription JSON, using raw text fallback:', text);
+      console.log('[Audio API] Using raw text fallback transcription.');
       result.transcription = text.replace(/[{}"\\]/g, '').trim();
     }
 
@@ -337,21 +388,27 @@ Respond ONLY with valid JSON in this exact structure, with no extra commentary o
       modelUsed,
     });
   } catch (error: any) {
-    console.error('Error in /api/audio/transcribe:', error);
-    res.status(500).json({
-      error: error?.message || 'Failed to transcribe audio recording with Gemini.',
+    console.log('[Audio API] Voice reflection fallback active:', error?.message);
+    res.json({
+      transcription: 'Voice reflection captured.',
+      emotionalTags: ['Reflective', 'Mindful'],
+      dominantCategory: 'Reflection',
+      emotionalSummary: 'A mindful voice reflection recorded and saved.',
+      modelUsed: 'voice-fallback',
+      isFallback: true,
     });
   }
 });
 
 // Video reflection recording & multimodal mood/talks analysis endpoint
 app.post('/api/video/analyze', async (req: Request, res: Response) => {
+  let thumbnail: string | null = null;
   try {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     let audioData = typeof body.audioData === 'string' ? body.audioData : '';
     let audioMimeType = typeof body.audioMimeType === 'string' ? body.audioMimeType : 'audio/webm';
     const frames: string[] = Array.isArray(body.frames) ? body.frames : [];
-    const thumbnail = typeof body.thumbnail === 'string' ? body.thumbnail : null;
+    thumbnail = typeof body.thumbnail === 'string' ? body.thumbnail : null;
 
     if (!audioData && frames.length === 0) {
       res.status(400).json({ error: 'Video frames or audio data are required for analysis.' });
@@ -476,7 +533,7 @@ Respond ONLY with valid JSON in this exact structure, with no markdown code fenc
         result.suggestedCommitment = parsed.suggestedCommitment.trim();
       }
     } catch (parseErr) {
-      console.warn('Failed to parse video analysis JSON, using fallback parsing:', text);
+      console.log('[Video API] Video analysis fallback parsing.');
       if (text.length > 0) {
         result.transcription = text.replace(/[{}"\\]/g, '').trim();
       }
@@ -487,9 +544,18 @@ Respond ONLY with valid JSON in this exact structure, with no markdown code fenc
       modelUsed,
     });
   } catch (error: any) {
-    console.error('Error in /api/video/analyze:', error);
-    res.status(500).json({
-      error: error?.message || 'Failed to analyze video reflection with Gemini.',
+    console.log('[Video API] Video reflection fallback active:', error?.message);
+    res.json({
+      transcription: 'Video reflection recorded.',
+      dominantCategory: 'Reflection',
+      emotionalTags: ['Reflective', 'Mindful'],
+      visualMoodAnalysis: 'Video reflection recorded with centered presence.',
+      overallSentiment: 'Gently Reflective',
+      emotionalSummary: 'A heartfelt video reflection captured.',
+      suggestedCommitment: null,
+      videoThumbnail: thumbnail,
+      modelUsed: 'video-fallback',
+      isFallback: true,
     });
   }
 });
@@ -615,14 +681,20 @@ app.get('/api/geocode/reverse', async (req: Request, res: Response) => {
 
 // Dynamic AI Prompt Generator for varied, creative reflection ideas
 app.post('/api/prompts/generate', async (req: Request, res: Response) => {
+  let isFuture = false;
   try {
-    const { type, theme, previousPrompts } = req.body || {};
-    const isFuture = type === 'future';
+    const { type, theme, recentCategories, recentSummaries } = req.body || {};
+    isFuture = type === 'future' || type === 'future_letter';
+
+    const contextAddition = Array.isArray(recentCategories) && recentCategories.length > 0
+      ? `User's recent reflection themes: ${recentCategories.join(', ')}. Gently condition one or more prompts to either resonate with or offer a peaceful counterbalance to these themes.`
+      : '';
 
     const prompt = isFuture
       ? `You are an imaginative, emotionally perceptive creative writing mentor and mindfulness guide.
 The user wants 3 brand-new, original, deeply evocative prompt ideas for writing a letter to their future self ("Dear Future Me").
 Requested Theme / Tone: "${theme || 'Vivid, unconventional, introspective'}".
+${contextAddition}
 Avoid generic, tired questions like "Where do you see yourself in 5 years?" or "Did you buy a house?".
 Instead, offer poetic, tender, or thought-provoking angles:
 - Sensory time capsules (textures, songs on repeat, exact taste of morning coffee)
@@ -642,6 +714,7 @@ Respond ONLY with valid JSON in this exact structure:
       : `You are an imaginative, emotionally perceptive mindfulness companion and journal guide.
 The user wants 3 brand-new, deeply thoughtful, refreshing, and unconventional journaling prompts.
 Requested Theme / Tone: "${theme || 'Original, honest, thought-provoking'}".
+${contextAddition}
 Avoid repetitive, boring clichés like "What are 3 things you are grateful for today?" or "How was your day?".
 Instead, offer prompts that spark genuine psychological insight, bodily grounding, or naming unspoken feelings:
 - Paradoxes and conflicting emotions felt at the same time
@@ -687,8 +760,151 @@ Respond ONLY with valid JSON in this exact structure:
       modelUsed,
     });
   } catch (err: any) {
-    console.error('Error in /api/prompts/generate:', err);
-    res.status(500).json({ error: 'Failed to generate prompts' });
+    console.log('[Prompts API] Curated prompt fallback active:', err?.message);
+    const fallbackPrompts = isFuture
+      ? [
+          'What is one quiet truth you hope your future self has never forgotten?',
+          'Describe the exact sounds, scents, and textures of your life in this very moment.',
+          'What is something you are navigating today that you hope will feel resolved or softened?',
+        ]
+      : [
+          'What is a quiet feeling you noticed today that you have not put into words yet?',
+          'Where did you feel tension or ease in your body today, and what was it trying to tell you?',
+          'What is one act of patience or kindness you can offer yourself before tomorrow begins?',
+        ];
+    res.json({
+      prompts: fallbackPrompts,
+      modelUsed: 'curated-fallback',
+      isFallback: true,
+    });
+  }
+});
+
+// Constellation real lore endpoint (Trace the Sky)
+app.post('/api/constellation/lore', async (req: Request, res: Response) => {
+  try {
+    const { name, commonName, notableStars = [], season = '' } = req.body || {};
+    if (!name) {
+      res.status(400).json({ error: 'Constellation name is required' });
+      return;
+    }
+
+    const prompt = `You are a quiet, warm celestial guide and astronomer.
+The user has just completed tracing the real constellation: ${name}${commonName ? ` (${commonName})` : ''}.
+${notableStars && notableStars.length > 0 ? `Notable stars in this pattern include: ${notableStars.join(', ')}.` : ''}
+${season ? `Visibility in the sky: ${season}.` : ''}
+
+In the app's warm, serene, non-clinical voice:
+1. Explain what this real celestial pattern represents and its rich cultural or mythological stories (feel free to include non-Western traditions such as Polynesian, Arabic, Chinese, Ojibwe, or Indigenous lore where accurate and relevant).
+2. Mention one or two of its notable stars and when or where in the real sky it can be discovered.
+3. Keep it to a short, readable 2 to 4 sentences. This is a calm moment of quiet discovery, not an encyclopedia entry.
+4. Because the constellation name is real (${name}), describe ONLY this real constellation and do not invent fictional facts or fictional stars.
+
+Respond ONLY with valid JSON in this exact structure:
+{
+  "lore": "The 2 to 4 sentences describing the real constellation in a warm, calm, reflective voice."
+}`;
+
+    const { text, modelUsed } = await generateContentWithFallback({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      systemInstruction: 'You are a warm, contemplative celestial guide. You describe real astronomical constellations accurately and peacefully. Always return strict JSON.',
+      temperature: 0.6,
+    });
+
+    let lore = '';
+    try {
+      const cleanJson = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleanJson);
+      if (parsed.lore && typeof parsed.lore === 'string') {
+        lore = parsed.lore.trim();
+      }
+    } catch {
+      lore = text.trim();
+    }
+
+    res.json({ lore: lore || null, modelUsed });
+  } catch (err: any) {
+    console.log('[Constellation Lore API] Fallback active:', err?.message);
+    res.json({
+      lore: null,
+      modelUsed: 'handwritten-fallback',
+      isFallback: true,
+    });
+  }
+});
+
+// Constellation poetic naming endpoint
+app.post('/api/constellation/name', async (req: Request, res: Response) => {
+  try {
+    const { starCount = 5, lineCount = 4, shapeDescription = '' } = req.body || {};
+
+    const prompt = `You are a quiet, poetic astronomer and mindfulness guide.
+A person just drew a custom constellation in their quiet night sky.
+Details:
+- Number of stars: ${starCount}
+- Number of connecting threads: ${lineCount}
+${shapeDescription ? `- Shape characteristics: ${shapeDescription}` : ''}
+
+Invent a short, evocative, non-clichéd constellation name (2-4 words, like "The Solitary Sail", "The Weaver's Knot", "The River of Breaths", "The Lantern Bearer", "The Quiet Anchor", "The Mountain Hearth").
+Also provide a single poetic, grounding line about it (1 sentence, warm, meditative, peaceful).
+
+Respond ONLY with valid JSON in this exact structure:
+{
+  "name": "The Evocative Name",
+  "poeticLine": "A single sentence that feels comforting and poetic."
+}`;
+
+    const { text, modelUsed } = await generateContentWithFallback({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      systemInstruction: 'You are a warm, poetic mindfulness companion. Always return strict JSON.',
+      temperature: 0.9,
+    });
+
+    let result = {
+      name: 'The Quiet Anchor',
+      poeticLine: 'A reminder that stillness is not the absence of life, but the quiet center where it gathers.',
+    };
+
+    try {
+      const cleanJson = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleanJson);
+      if (parsed.name && typeof parsed.name === 'string') result.name = parsed.name.trim();
+      if (parsed.poeticLine && typeof parsed.poeticLine === 'string') result.poeticLine = parsed.poeticLine.trim();
+    } catch {
+      // Keep defaults
+    }
+
+    res.json({ ...result, modelUsed });
+  } catch (err: any) {
+    console.log('[Constellation API] Poetic fallback active:', err?.message);
+    const poeticFallbacks = [
+      {
+        name: 'The Quiet Anchor',
+        poeticLine: 'A reminder that stillness is not the absence of life, but the quiet center where it gathers.',
+      },
+      {
+        name: 'The Lantern Bearer',
+        poeticLine: 'Carrying just enough gentle warmth to illuminate the next step into dusk.',
+      },
+      {
+        name: 'The River of Breaths',
+        poeticLine: 'Slow currents woven through dark water, finding patience in the natural bends.',
+      },
+      {
+        name: 'The Solitary Sail',
+        poeticLine: 'Drifting between quiet horizons, peaceful in the presence of gentle wind.',
+      },
+      {
+        name: 'The Weaver’s Knot',
+        poeticLine: 'Holding together thoughts that felt scattered until you traced the line.',
+      },
+      {
+        name: 'The Meadow’s Edge',
+        poeticLine: 'Where the noise of the day softens into the cricket song of night.',
+      },
+    ];
+    const picked = poeticFallbacks[Math.floor(Math.random() * poeticFallbacks.length)];
+    res.json({ ...picked, modelUsed: 'poetic-fallback', isFallback: true });
   }
 });
 
@@ -770,7 +986,7 @@ Respond ONLY with valid JSON in this exact structure, with no markdown code fenc
       if (Array.isArray(raw.observations) && raw.observations.length > 0) digestData.observations = raw.observations.map((o: any) => String(o).trim());
       if (raw.encouragement && typeof raw.encouragement === 'string') digestData.encouragement = raw.encouragement.trim();
     } catch (parseErr) {
-      console.warn('Failed to parse Gemini digest JSON, using fallback data:', text);
+      console.log('[Digest API] Structured digest fallback parsing.');
     }
 
     res.json({
@@ -778,16 +994,15 @@ Respond ONLY with valid JSON in this exact structure, with no markdown code fenc
       modelUsed,
     });
   } catch (error: any) {
-    console.error('Error in /api/digest/generate:', error);
-    res.status(500).json({
-      error: error?.message || 'Failed to generate weekly retrospective.',
-      fallback: {
-        title: 'Weekly Journal Retrospective',
-        themes: ['Mindful daily journaling', 'Inner clarity'],
-        moodShift: 'Your reflections continue to build a meaningful record of your thoughts and personal journey.',
-        observations: ['Consistent time spent reflecting creates space for emotional growth.'],
-        encouragement: 'Take pride in the space you have carved out for yourself this week.',
-      },
+    console.log('[Digest API] Retrospective fallback active:', error?.message);
+    res.json({
+      title: 'Weekly Journal Retrospective',
+      themes: ['Mindful daily journaling', 'Emotional balance', 'Intentional presence'],
+      moodShift: 'Across this week, your reflections demonstrate quiet dedication to self-awareness and mindful stillness.',
+      observations: ['You consistently carved out moments for yourself amidst the rhythm of your week.'],
+      encouragement: 'Take pride in the space you created for yourself. Carry this gentle clarity into the days ahead.',
+      modelUsed: 'digest-fallback',
+      isFallback: true,
     });
   }
 });

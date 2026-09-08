@@ -17,7 +17,7 @@ interface ReflectionContextType {
   handleSendMessage: (customText?: string) => Promise<void>;
   handleEndAndSaveSession: (
     streak: number,
-    onSuccess?: () => void,
+    onSuccess?: (category?: JournalCategory) => void,
     location?: JournalLocation | null
   ) => Promise<boolean>;
   handleDiscardDraft: () => void;
@@ -28,10 +28,15 @@ const ReflectionContext = createContext<ReflectionContextType | undefined>(undef
 
 interface ReflectionProviderProps {
   user: UserProfile;
+  dailyCheckinsEnabled?: boolean;
   children: React.ReactNode;
 }
 
-export const ReflectionProvider: React.FC<ReflectionProviderProps> = ({ user, children }) => {
+export const ReflectionProvider: React.FC<ReflectionProviderProps> = ({
+  user,
+  dailyCheckinsEnabled = true,
+  children,
+}) => {
   const DRAFT_STORAGE_KEY = `reflect_draft_${user.uid}`;
 
   // Active chat messages
@@ -159,7 +164,7 @@ export const ReflectionProvider: React.FC<ReflectionProviderProps> = ({ user, ch
   // End and save session to Firestore
   const handleEndAndSaveSession = async (
     streak: number,
-    onSuccess?: () => void,
+    onSuccess?: (category?: JournalCategory) => void,
     location?: JournalLocation | null
   ): Promise<boolean> => {
     if (messages.length === 0 || isSaving) return false;
@@ -168,7 +173,7 @@ export const ReflectionProvider: React.FC<ReflectionProviderProps> = ({ user, ch
     setSaveError(null);
 
     try {
-      // 1. Send conversation to Gemini for auto-summary, categorization & next-day micro-commitment
+      // 1. Send conversation to Gemini for auto-summary, categorization & (if enabled) next-day micro-commitment
       let summary = 'Mindful journaling session';
       let aiCategory: JournalCategory = 'Reflection';
       let nextDayCommitment: string | null = null;
@@ -179,6 +184,7 @@ export const ReflectionProvider: React.FC<ReflectionProviderProps> = ({ user, ch
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             messages: messages.map((m) => ({ role: m.role, text: m.text })),
+            extractCommitment: dailyCheckinsEnabled,
           }),
         });
 
@@ -186,7 +192,9 @@ export const ReflectionProvider: React.FC<ReflectionProviderProps> = ({ user, ch
           const sumData = await sumResponse.json();
           if (sumData.summary) summary = sumData.summary;
           if (sumData.category) aiCategory = sumData.category;
-          if (sumData.nextDayCommitment) nextDayCommitment = sumData.nextDayCommitment;
+          if (dailyCheckinsEnabled && sumData.nextDayCommitment) {
+            nextDayCommitment = sumData.nextDayCommitment;
+          }
         }
       } catch (sumErr) {
         console.warn('Summarization fallback triggered:', sumErr);
@@ -199,7 +207,7 @@ export const ReflectionProvider: React.FC<ReflectionProviderProps> = ({ user, ch
         aiCategory,
         userCategory: aiCategory,
         streakCount: streak + 1,
-        nextDayCommitment: nextDayCommitment || null,
+        nextDayCommitment: dailyCheckinsEnabled ? (nextDayCommitment || null) : null,
         location: location || null,
       });
 
@@ -212,7 +220,7 @@ export const ReflectionProvider: React.FC<ReflectionProviderProps> = ({ user, ch
         console.warn('Could not clear sessionStorage draft', e);
       }
 
-      if (onSuccess) onSuccess();
+      if (onSuccess) onSuccess(aiCategory);
       return true;
     } catch (err: any) {
       console.error('Failed to save journal session:', err);

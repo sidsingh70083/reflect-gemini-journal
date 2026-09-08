@@ -396,36 +396,46 @@ export const CadenceHeatmap: React.FC<CadenceHeatmapProps> = ({ entries }) => {
             </div>
           )}
 
-          {/* Intensity Key */}
-          <div className="flex items-center gap-1.5 text-[10px] text-[#858376] dark:text-[#8E8C7F] self-end sm:self-center ml-auto">
-            <span>Fewer</span>
-            <div className="w-2.5 h-2.5 rounded-xs bg-[#EAE8E0] dark:bg-[#282621]" />
-            <div className="w-2.5 h-2.5 rounded-xs bg-[#059669]/50" />
-            <div className="w-2.5 h-2.5 rounded-xs bg-[#059669]/80" />
-            <div className="w-2.5 h-2.5 rounded-xs bg-[#059669]" />
-            <span>More</span>
+          {/* Intensity & Volume Key (Resolved: explains opacity/shading with neutral archetype rather than misleading green) */}
+          <div className="flex items-center gap-2 text-[10px] text-[#858376] dark:text-[#8E8C7F] self-end sm:self-center ml-auto">
+            <span>Volume:</span>
+            <div className="flex items-center gap-1">
+              <div className="w-2.5 h-2.5 rounded-xs bg-[#EAE8E0] dark:bg-[#282621] border border-[#D5D2C7]/60 dark:border-[#3E3C34]" title="0 reflections" />
+              <span className="text-[9px]">0</span>
+              <div className="w-2.5 h-2.5 rounded-xs bg-[#4A4A38]/70 dark:bg-[#D4D0C2]/70" title="1 reflection (soft)" />
+              <span className="text-[9px]">1</span>
+              <div className="w-2.5 h-2.5 rounded-xs bg-[#4A4A38]/88 dark:bg-[#D4D0C2]/88" title="2 reflections (medium)" />
+              <span className="text-[9px]">2</span>
+              <div className="w-2.5 h-2.5 rounded-xs bg-[#4A4A38] dark:bg-[#D4D0C2]" title="3+ reflections (vivid)" />
+              <span className="text-[9px]">3+</span>
+            </div>
           </div>
         </div>
 
         {/* Category Mood Color Legend */}
-        <div className="pt-2 flex items-center gap-3 flex-wrap text-xs">
-          <span className="text-[10px] uppercase font-bold text-[#858376] dark:text-[#8E8C7F] font-sans">
-            Mood Colors:
-          </span>
+        <div className="pt-2 flex items-center justify-between gap-3 flex-wrap text-xs">
           <div className="flex items-center gap-2 flex-wrap">
-            {JOURNAL_CATEGORIES.map((cat) => {
-              const cfg = CATEGORY_CONFIG[cat];
-              return (
-                <div key={cat} className="flex items-center gap-1 text-[11px] text-[#757469] dark:text-[#A6A498]">
-                  <span
-                    className="w-2 h-2 rounded-full"
-                    style={{ backgroundColor: cfg.color }}
-                  />
-                  <span>{cat}</span>
-                </div>
-              );
-            })}
+            <span className="text-[10px] uppercase font-bold text-[#858376] dark:text-[#8E8C7F] font-sans">
+              Dominant Mood Hue:
+            </span>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              {JOURNAL_CATEGORIES.map((cat) => {
+                const cfg = CATEGORY_CONFIG[cat];
+                return (
+                  <div key={cat} className="flex items-center gap-1 text-[11px] text-[#757469] dark:text-[#A6A498]">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0 shadow-2xs"
+                      style={{ backgroundColor: cfg.color }}
+                    />
+                    <span>{cat}</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
+          <span className="text-[10px] text-[#858376] dark:text-[#8E8C7F] italic">
+            Hue shows dominant mood · Depth shows reflection count
+          </span>
         </div>
       </div>
 
@@ -457,13 +467,13 @@ export const CadenceHeatmap: React.FC<CadenceHeatmapProps> = ({ entries }) => {
         {/* 4 Diurnal Period Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
           {/* Morning */}
-          <div className="p-3 rounded-xl bg-[#FAF9F5] dark:bg-[#1D1C18] border border-[#E6E4DD] dark:border-[#2E2C26] space-y-1">
-            <div className="flex items-center justify-between text-xs text-[#757469] dark:text-[#A6A498]">
-              <div className="flex items-center gap-1">
-                <Sunrise className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                <span className="font-medium">Morning</span>
+          <div className="p-3 rounded-xl bg-[#FAF9F5] dark:bg-[#1D1C18] border border-[#E6E4DD] dark:border-[#2E2C26] space-y-1.5">
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-1.5 text-xs text-[#757469] dark:text-[#A6A498]">
+                <Sunrise className="w-3.5 h-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                <span className="font-medium text-[#3A3A35] dark:text-[#EDEAE2]">Morning</span>
               </div>
-              <span className="text-[10px]">6am–12pm</span>
+              <span className="text-[10px] text-[#858376] dark:text-[#8E8C7F] pl-5">6am – 12pm</span>
             </div>
             <p className="font-serif text-lg font-medium text-[#3A3A35] dark:text-[#EDEAE2]">
               {periodBreakdown.morning} <span className="text-xs font-normal text-[#858376] dark:text-[#8E8C7F]">entries</span>
@@ -471,13 +481,13 @@ export const CadenceHeatmap: React.FC<CadenceHeatmapProps> = ({ entries }) => {
           </div>
 
           {/* Afternoon */}
-          <div className="p-3 rounded-xl bg-[#FAF9F5] dark:bg-[#1D1C18] border border-[#E6E4DD] dark:border-[#2E2C26] space-y-1">
-            <div className="flex items-center justify-between text-xs text-[#757469] dark:text-[#A6A498]">
-              <div className="flex items-center gap-1">
-                <Sun className="w-3.5 h-3.5 text-orange-500 dark:text-orange-400" />
-                <span className="font-medium">Afternoon</span>
+          <div className="p-3 rounded-xl bg-[#FAF9F5] dark:bg-[#1D1C18] border border-[#E6E4DD] dark:border-[#2E2C26] space-y-1.5">
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-1.5 text-xs text-[#757469] dark:text-[#A6A498]">
+                <Sun className="w-3.5 h-3.5 shrink-0 text-orange-500 dark:text-orange-400" />
+                <span className="font-medium text-[#3A3A35] dark:text-[#EDEAE2]">Afternoon</span>
               </div>
-              <span className="text-[10px]">12pm–6pm</span>
+              <span className="text-[10px] text-[#858376] dark:text-[#8E8C7F] pl-5">12pm – 6pm</span>
             </div>
             <p className="font-serif text-lg font-medium text-[#3A3A35] dark:text-[#EDEAE2]">
               {periodBreakdown.afternoon} <span className="text-xs font-normal text-[#858376] dark:text-[#8E8C7F]">entries</span>
@@ -485,13 +495,13 @@ export const CadenceHeatmap: React.FC<CadenceHeatmapProps> = ({ entries }) => {
           </div>
 
           {/* Evening */}
-          <div className="p-3 rounded-xl bg-[#FAF9F5] dark:bg-[#1D1C18] border border-[#E6E4DD] dark:border-[#2E2C26] space-y-1">
-            <div className="flex items-center justify-between text-xs text-[#757469] dark:text-[#A6A498]">
-              <div className="flex items-center gap-1">
-                <Sunset className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
-                <span className="font-medium">Evening</span>
+          <div className="p-3 rounded-xl bg-[#FAF9F5] dark:bg-[#1D1C18] border border-[#E6E4DD] dark:border-[#2E2C26] space-y-1.5">
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-1.5 text-xs text-[#757469] dark:text-[#A6A498]">
+                <Sunset className="w-3.5 h-3.5 shrink-0 text-indigo-500 dark:text-indigo-400" />
+                <span className="font-medium text-[#3A3A35] dark:text-[#EDEAE2]">Evening</span>
               </div>
-              <span className="text-[10px]">6pm–11pm</span>
+              <span className="text-[10px] text-[#858376] dark:text-[#8E8C7F] pl-5">6pm – 11pm</span>
             </div>
             <p className="font-serif text-lg font-medium text-[#3A3A35] dark:text-[#EDEAE2]">
               {periodBreakdown.evening} <span className="text-xs font-normal text-[#858376] dark:text-[#8E8C7F]">entries</span>
@@ -499,13 +509,13 @@ export const CadenceHeatmap: React.FC<CadenceHeatmapProps> = ({ entries }) => {
           </div>
 
           {/* Night */}
-          <div className="p-3 rounded-xl bg-[#FAF9F5] dark:bg-[#1D1C18] border border-[#E6E4DD] dark:border-[#2E2C26] space-y-1">
-            <div className="flex items-center justify-between text-xs text-[#757469] dark:text-[#A6A498]">
-              <div className="flex items-center gap-1">
-                <Moon className="w-3.5 h-3.5 text-violet-500 dark:text-violet-400" />
-                <span className="font-medium">Night</span>
+          <div className="p-3 rounded-xl bg-[#FAF9F5] dark:bg-[#1D1C18] border border-[#E6E4DD] dark:border-[#2E2C26] space-y-1.5">
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-1.5 text-xs text-[#757469] dark:text-[#A6A498]">
+                <Moon className="w-3.5 h-3.5 shrink-0 text-violet-500 dark:text-violet-400" />
+                <span className="font-medium text-[#3A3A35] dark:text-[#EDEAE2]">Night</span>
               </div>
-              <span className="text-[10px]">11pm–6am</span>
+              <span className="text-[10px] text-[#858376] dark:text-[#8E8C7F] pl-5">11pm – 6am</span>
             </div>
             <p className="font-serif text-lg font-medium text-[#3A3A35] dark:text-[#EDEAE2]">
               {periodBreakdown.night} <span className="text-xs font-normal text-[#858376] dark:text-[#8E8C7F]">entries</span>

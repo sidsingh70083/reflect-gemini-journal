@@ -518,13 +518,16 @@ export const AudioRecorderPanel: React.FC<AudioRecorderPanelProps> = ({
 interface AudioRecordButtonProps {
   recorder: ReturnType<typeof useAudioRecorder>;
   disabled?: boolean;
+  size?: 'sm' | 'md';
 }
 
 export const AudioRecordButton: React.FC<AudioRecordButtonProps> = ({
   recorder,
   disabled = false,
+  size = 'md',
 }) => {
   const { isRecording, isTranscribing, startRecording, stopRecording } = recorder;
+  const isSmall = size === 'sm';
 
   return (
     <button
@@ -532,7 +535,7 @@ export const AudioRecordButton: React.FC<AudioRecordButtonProps> = ({
       type="button"
       disabled={disabled || isTranscribing}
       onClick={isRecording ? stopRecording : startRecording}
-      className={`p-2 rounded-xl transition-all duration-200 cursor-pointer relative ${
+      className={`${isSmall ? 'p-1.5 rounded-lg' : 'p-2 rounded-xl'} transition-all duration-200 cursor-pointer relative ${
         isRecording
           ? 'bg-rose-600 text-white shadow-md animate-pulse ring-2 ring-rose-300 dark:ring-rose-800'
           : isTranscribing
@@ -548,7 +551,7 @@ export const AudioRecordButton: React.FC<AudioRecordButtonProps> = ({
       }
       aria-label={isRecording ? 'Stop voice recording' : 'Record voice reflection'}
     >
-      <Mic className={`w-4 h-4 ${isRecording ? 'animate-bounce' : ''}`} />
+      <Mic className={`${isSmall ? 'w-3.5 h-3.5' : 'w-4 h-4'} ${isRecording ? 'animate-bounce' : ''}`} />
       {isRecording && (
         <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full animate-ping" />
       )}

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
   UserProfile,
   JournalEntry,
+  UserSettings,
+  DEFAULT_USER_SETTINGS,
 } from './types';
 import {
   subscribeToAuth,
@@ -9,6 +11,8 @@ import {
   logOut,
   subscribeToUserEntries,
   calculateStreak,
+  subscribeToUserSettings,
+  saveUserSettings,
 } from './lib/firebase';
 import { Header } from './components/Header';
 import { TabsNav, TabType } from './components/TabsNav';
@@ -16,7 +20,10 @@ import { LandingPage } from './components/LandingPage';
 import { MySpaceView } from './components/MySpaceView';
 import { TrendsView } from './components/TrendsView';
 import { LetterToFutureView } from './components/LetterToFutureView';
+import { StillnessView } from './components/stillness/StillnessView';
+import { SettingsPanel } from './components/SettingsPanel';
 import { ReflectionProvider } from './context/ReflectionContext';
+import { ambientSound } from './lib/ambientSound';
 
 export default function App() {
   // Authentication state
@@ -31,30 +38,19 @@ export default function App() {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [streak, setStreak] = useState<number>(0);
 
-  // Dark Mode Theme State
-  const [isDark, setIsDark] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('reflect_theme');
-      if (saved) return saved === 'dark';
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
-    return false;
-  });
+  // User Settings State (Persisted to Firestore users/{uid}/settings/preferences)
+  const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
-  // Apply dark mode class to root document
+  // Apply dark mode class to root document based on settings
   useEffect(() => {
+    const isDark = userSettings.theme === 'dark';
     if (isDark) {
       document.documentElement.classList.add('dark');
-      localStorage.setItem('reflect_theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
-      localStorage.setItem('reflect_theme', 'light');
     }
-  }, [isDark]);
-
-  const toggleDarkMode = () => {
-    setIsDark((prev) => !prev);
-  };
+  }, [userSettings.theme]);
 
   // Auth State Listener
   useEffect(() => {
@@ -70,6 +66,7 @@ export default function App() {
         setUser(null);
         setEntries([]);
         setStreak(0);
+        setUserSettings(DEFAULT_USER_SETTINGS);
       }
       setIsAuthLoading(false);
     });
@@ -77,11 +74,12 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Subscribe to Firestore Entries when authenticated
+  // Subscribe to Firestore Entries and User Settings when authenticated
   useEffect(() => {
     if (!user) return;
 
-    const unsubscribe = subscribeToUserEntries(
+    // 1. Subscribe to journal entries
+    const unsubEntries = subscribeToUserEntries(
       user.uid,
       (userEntries) => {
         setEntries(userEntries);
@@ -93,8 +91,44 @@ export default function App() {
       }
     );
 
-    return () => unsubscribe();
+    // 2. Subscribe to user preferences in Firestore
+    const unsubSettings = subscribeToUserSettings(
+      user.uid,
+      (settings) => {
+        setUserSettings(settings);
+        // Configure ambient sound engine to match user's saved preferences
+        ambientSound.setEnabled(settings.ambientSoundEnabled);
+        ambientSound.setVolume(settings.ambientSoundVolume);
+        ambientSound.setTexture(settings.ambientSoundTexture);
+      },
+      (err) => {
+        console.error('Failed to subscribe to user settings:', err);
+      }
+    );
+
+    return () => {
+      unsubEntries();
+      unsubSettings();
+    };
   }, [user]);
+
+  // Handle settings update (optimistic local update + Firestore sync)
+  const handleUpdateSettings = async (updates: Partial<UserSettings>) => {
+    setUserSettings((prev) => ({ ...prev, ...updates }));
+
+    if (user) {
+      try {
+        await saveUserSettings(user.uid, updates);
+      } catch (err) {
+        console.error('Failed to save user settings:', err);
+      }
+    }
+  };
+
+  // Notify ambient sound engine of current screen context
+  useEffect(() => {
+    ambientSound.setStillnessContext(activeTab === 'stillness');
+  }, [activeTab]);
 
   // Sign In Handler
   const handleSignIn = async () => {
@@ -115,6 +149,7 @@ export default function App() {
   // Sign Out Handler
   const handleSignOut = async () => {
     try {
+      ambientSound.dispose();
       await logOut();
     } catch (err) {
       console.error('Sign-out failed:', err);
@@ -144,20 +179,28 @@ export default function App() {
         </main>
       ) : (
         /* Authenticated View: Header, Tabs, & Screen Views */
-        <ReflectionProvider user={user}>
+        <ReflectionProvider user={user} dailyCheckinsEnabled={userSettings.dailyCheckinsEnabled}>
           <Header
             user={user}
             streak={streak}
-            isDark={isDark}
-            onToggleDark={toggleDarkMode}
+            customAvatar={userSettings.customAvatar}
+            onOpenSettings={() => setIsSettingsOpen(true)}
             onSignOut={handleSignOut}
           />
 
           <TabsNav activeTab={activeTab} onTabChange={setActiveTab} />
 
-          <main className="flex-1 pb-16">
+          <main className="flex-1 pb-24 md:pb-16">
             <div className={activeTab === 'my-space' ? 'block' : 'hidden'}>
-              <MySpaceView user={user} entries={entries} streak={streak} />
+              <MySpaceView
+                user={user}
+                entries={entries}
+                streak={streak}
+                dailyCheckinsEnabled={userSettings.dailyCheckinsEnabled}
+                locationEnabled={userSettings.locationEnabled ?? false}
+                customAvatar={userSettings.customAvatar}
+                onNavigateTab={(tab) => setActiveTab(tab as TabType)}
+              />
             </div>
             <div className={activeTab === 'trends' ? 'block' : 'hidden'}>
               <TrendsView user={user} entries={entries} />
@@ -165,7 +208,21 @@ export default function App() {
             <div className={activeTab === 'letter-to-future' ? 'block' : 'hidden'}>
               <LetterToFutureView user={user} />
             </div>
+            <div className={activeTab === 'stillness' ? 'block' : 'hidden'}>
+              <div className="max-w-4xl mx-auto px-4 sm:px-6 pt-6">
+                <StillnessView onNavigateTab={(tab) => setActiveTab(tab as TabType)} />
+              </div>
+            </div>
           </main>
+
+          {/* Slide-out Settings Panel */}
+          <SettingsPanel
+            isOpen={isSettingsOpen}
+            user={user}
+            onClose={() => setIsSettingsOpen(false)}
+            settings={userSettings}
+            onUpdateSettings={handleUpdateSettings}
+          />
         </ReflectionProvider>
       )}
     </div>

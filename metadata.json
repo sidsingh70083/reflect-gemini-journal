@@ -1,6 +1,6 @@
 {
   "name": "Reflect",
-  "description": "A mindful personal journaling web application powered by Gemini AI and Cloud Firestore with smart emotional categorization, daily streak tracking, weekly retrospectives, micro-commitments, letters to future self, voice reflections, video mood analysis, geotagged reflections, and minimalist print-ready PDF archiving.",
+  "description": "A mindful personal journaling web application powered by Gemini AI and Cloud Firestore with smart emotional categorization, daily streak tracking, real astronomical constellation tracing, in-browser Web Audio ambient sound, interactive Stillness calm space, letters to future self, and minimalist PDF archiving.",
   "requestFramePermissions": ["microphone", "camera", "geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

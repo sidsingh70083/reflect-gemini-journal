@@ -94,6 +94,35 @@ export function formatLocalMonthDay(dateOrMillis?: Date | number | null): string
   });
 }
 
+/**
+ * Formats a start and end timestamp range into a clean, localized string.
+ * - If both timestamps fall on the same local calendar day, returns single date (e.g. "Sep 1, 2026"), avoiding redundant "Sep 1 – Sep 1, 2026".
+ * - If spanning multiple days within the same year: "Aug 25 – Sep 1, 2026".
+ * - If spanning across years: "Dec 28, 2025 – Jan 4, 2026".
+ */
+export function formatDateRange(startMillis?: number | null, endMillis?: number | null): string {
+  if (!startMillis && !endMillis) return '';
+  if (!startMillis) return formatLocalDate(endMillis);
+  if (!endMillis) return formatLocalDate(startMillis);
+
+  const startKey = getLocalDateKey(startMillis);
+  const endKey = getLocalDateKey(endMillis);
+
+  // Same calendar day
+  if (startKey === endKey) {
+    return formatLocalDate(startMillis);
+  }
+
+  const startDate = new Date(startMillis);
+  const endDate = new Date(endMillis);
+
+  if (startDate.getFullYear() === endDate.getFullYear()) {
+    return `${formatLocalMonthDay(startMillis)} – ${formatLocalDate(endMillis)}`;
+  }
+
+  return `${formatLocalDate(startMillis)} – ${formatLocalDate(endMillis)}`;
+}
+
 export type DateGroupCategory = 'Today' | 'Yesterday' | 'This Week' | 'Earlier';
 
 /**

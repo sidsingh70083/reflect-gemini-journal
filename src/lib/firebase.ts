@@ -24,7 +24,17 @@ import {
   QuerySnapshot,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { JournalCategory, JournalEntry, JournalMessage, WeeklyDigest, LetterToFuture, CommitmentCheckin, JournalLocation } from '../types';
+import {
+  JournalCategory,
+  JournalEntry,
+  JournalMessage,
+  WeeklyDigest,
+  LetterToFuture,
+  CommitmentCheckin,
+  JournalLocation,
+  UserSettings,
+  DEFAULT_USER_SETTINGS,
+} from '../types';
 import { getLocalDateKey, parseDocTimestamp } from './dateUtils';
 
 // Initialize Firebase App
@@ -357,3 +367,74 @@ export function calculateStreak(entries: JournalEntry[]): number {
 
   return streak;
 }
+
+// Subscribe to User Settings in Firestore under users/{userId}/settings/preferences
+export function subscribeToUserSettings(
+  userId: string,
+  onUpdate: (settings: UserSettings) => void,
+  onError?: (err: any) => void
+) {
+  const settingsDocRef = doc(db, 'users', userId, 'settings', 'preferences');
+
+  return onSnapshot(
+    settingsDocRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        const settings: UserSettings = {
+          theme: data.theme === 'dark' ? 'dark' : 'light',
+          ambientSoundEnabled:
+            typeof data.ambientSoundEnabled === 'boolean'
+              ? data.ambientSoundEnabled
+              : DEFAULT_USER_SETTINGS.ambientSoundEnabled,
+          ambientSoundTexture:
+            data.ambientSoundTexture &&
+            ['soft-wash', 'airy', 'warm-drone', 'rain'].includes(data.ambientSoundTexture)
+              ? data.ambientSoundTexture
+              : DEFAULT_USER_SETTINGS.ambientSoundTexture,
+          ambientSoundVolume:
+            typeof data.ambientSoundVolume === 'number'
+              ? data.ambientSoundVolume
+              : DEFAULT_USER_SETTINGS.ambientSoundVolume,
+          dailyCheckinsEnabled:
+            typeof data.dailyCheckinsEnabled === 'boolean'
+              ? data.dailyCheckinsEnabled
+              : DEFAULT_USER_SETTINGS.dailyCheckinsEnabled,
+          interactionSoundsEnabled:
+            typeof data.interactionSoundsEnabled === 'boolean'
+              ? data.interactionSoundsEnabled
+              : DEFAULT_USER_SETTINGS.interactionSoundsEnabled,
+          locationEnabled:
+            typeof data.locationEnabled === 'boolean'
+              ? data.locationEnabled
+              : DEFAULT_USER_SETTINGS.locationEnabled,
+          customAvatar: data.customAvatar || DEFAULT_USER_SETTINGS.customAvatar,
+          updatedAt: data.updatedAt || Date.now(),
+        };
+        onUpdate(settings);
+      } else {
+        // Doc doesn't exist yet, return default settings
+        onUpdate(DEFAULT_USER_SETTINGS);
+      }
+    },
+    (err) => {
+      console.warn('Could not read user settings from Firestore:', err);
+      if (onError) onError(err);
+    }
+  );
+}
+
+// Save or merge user settings in Firestore under users/{userId}/settings/preferences
+export async function saveUserSettings(
+  userId: string,
+  updatedSettings: Partial<UserSettings>
+): Promise<void> {
+  const settingsDocRef = doc(db, 'users', userId, 'settings', 'preferences');
+  const payload = sanitizePayload({
+    ...updatedSettings,
+    updatedAt: Date.now(),
+  });
+
+  await setDoc(settingsDocRef, payload, { merge: true });
+}
+

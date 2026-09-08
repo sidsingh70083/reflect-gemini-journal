@@ -56,6 +56,18 @@
             "observations": { "type": "array", "description": "Gentle observations" },
             "encouragement": { "type": "string", "description": "Closing grounding affirmation" }
           }
+        },
+        "settings": {
+          "path": "users/{userId}/settings/{settingId}",
+          "description": "User preferences and system configurations",
+          "fields": {
+            "theme": { "type": "string", "description": "Color theme: light, dark, or system" },
+            "ambientSoundEnabled": { "type": "boolean", "description": "Whether ambient sound is active" },
+            "ambientSoundTexture": { "type": "string", "description": "Selected ambient sound texture" },
+            "ambientSoundVolume": { "type": "number", "description": "Ambient sound volume level from 0 to 1" },
+            "dailyCheckinsEnabled": { "type": "boolean", "description": "Whether next-day micro-commitments and check-ins are enabled" },
+            "updatedAt": { "type": "number", "description": "Last updated epoch timestamp" }
+          }
         }
       }
     }

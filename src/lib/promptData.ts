@@ -101,9 +101,35 @@ export const STARTER_PROMPTS_BY_THEME: PromptCategoryGroup[] = [
       "What does 'enough' look like for me today?",
     ],
   },
+  {
+    id: 'light-playful-nuance',
+    name: 'Light, Playful & Quirky',
+    emoji: '🎈',
+    description: 'Everyday eccentricities, small absurdities, and harmless fun',
+    prompts: [
+      "What is a harmless, trivial opinion I will defend with absolute passion?",
+      "What small coincidence or weirdly specific moment made me pause today?",
+      "If today were a background chapter in an indie film, what song would be playing during the mundane parts?",
+      "What is an eccentric habit or ritual of mine that nobody else gets to witness?",
+      "Which inanimate object gave me the most trouble today?",
+    ],
+  },
+  {
+    id: 'friction-frustration',
+    name: 'Friction & Frustration',
+    emoji: '⚡',
+    description: 'Honest processing of petty annoyances, impatience, and friction',
+    prompts: [
+      "What petty annoyance got under my skin today that I was too polite to react to?",
+      "Where am I leaking energy trying to control something that is not mine to fix?",
+      "What made me roll my eyes today, and what underlying need was hidden behind my cynicism?",
+      "What is a boundary I wish I had set six hours ago?",
+      "What is something I am genuinely sick of explaining to people?",
+    ],
+  },
 ];
 
-// Flat combined starter pool containing all diverse prompts
+// Flat combined starter pool containing all diverse prompts (50+ prompts)
 export const ALL_RICH_STARTER_PROMPTS: string[] = STARTER_PROMPTS_BY_THEME.flatMap(
   (group) => group.prompts
 );
@@ -120,6 +146,7 @@ export const LETTER_PROMPTS_BY_THEME: PromptCategoryGroup[] = [
       "What is a piece of slang, a cultural obsession, or a hobby you currently love that might make your future self smile?",
       "What did you eat today, what books are on your nightstand, and what does your handwriting look like right now?",
       "What is an ordinary problem you are dealing with today that you hope you have completely forgotten about by now?",
+      "What shoes did you wear most often this week, and where did they take you?",
     ],
   },
   {
@@ -134,6 +161,7 @@ export const LETTER_PROMPTS_BY_THEME: PromptCategoryGroup[] = [
       "Who are you spending your Sunday mornings with? Do your friendships feel calm and nourishing?",
       "What surprised you most about the road between the day I wrote this and the day you opened it?",
       "Are you giving yourself permission to rest without earning it first?",
+      "What did you end up doing with the dream that felt too fragile to talk about?",
     ],
   },
   {
@@ -147,6 +175,7 @@ export const LETTER_PROMPTS_BY_THEME: PromptCategoryGroup[] = [
       "A promise I am making to you today that I hope you haven't broken...",
       "Never forget who stood by you during the quiet, unglamorous seasons of your journey.",
       "If you find yourself chasing validation from strangers, read this to remember who you truly are.",
+      "What is an uncompromising rule of self-respect that younger you wants to remind you to protect?",
     ],
   },
   {
@@ -160,6 +189,7 @@ export const LETTER_PROMPTS_BY_THEME: PromptCategoryGroup[] = [
       "What is an apology you never received that you have hopefully stopped waiting around for?",
       "Celebrate the version of you who wrote this—they were doing the best they could with the tools they had.",
       "Whatever mistake you are currently replaying in your mind, breathe out. You are allowed to be human.",
+      "Look in the mirror today and forgive one physical or emotional trait you spent too long hiding.",
     ],
   },
   {
@@ -173,6 +203,19 @@ export const LETTER_PROMPTS_BY_THEME: PromptCategoryGroup[] = [
       "What is something you were too afraid to try when writing this that you hope you've now done?",
       "I hope that by the time you unlock this, you have witnessed something that took your breath away.",
       "Write a love letter to the life you are actively building with each small, invisible daily choice.",
+      "What is one skill, craft, or language you secretly hope you've become comfortable with?",
+    ],
+  },
+  {
+    id: 'honest-predictions',
+    name: 'Honest Predictions & What Not to Lose',
+    emoji: '🔮',
+    description: 'Unfiltered guesses about where you will be and what you must protect',
+    prompts: [
+      "Here is an honest prediction about where you will be living and working—let's see if I was anywhere close.",
+      "What is a simple habit you have right now that you pray you haven't traded away for busyness?",
+      "What friendship or bond do you hope has only grown deeper, more honest, and more laughter-filled?",
+      "What is something you used to care obsessively about that you hope is completely irrelevant to you now?",
     ],
   },
 ];
@@ -188,7 +231,7 @@ LETTER_PROMPTS_BY_THEME.forEach((theme) => {
   if (!theme.label) theme.label = theme.name;
 });
 
-// Flat combined letter prompts pool
+// Flat combined letter prompts pool (30+ prompts)
 export const ALL_RICH_LETTER_PROMPTS: string[] = LETTER_PROMPTS_BY_THEME.flatMap(
   (group) => group.prompts
 );
@@ -197,7 +240,74 @@ export const ALL_RICH_LETTER_PROMPTS: string[] = LETTER_PROMPTS_BY_THEME.flatMap
 export const DEAR_FUTURE_ME_THEMES = LETTER_PROMPTS_BY_THEME;
 export const ALL_RICH_FUTURE_LETTER_PROMPTS = ALL_RICH_LETTER_PROMPTS;
 
-// Helper to pick random distinct items
+/**
+ * Non-repeating shuffle helper:
+ * Never repeats a prompt already shown in the current session until the pool is exhausted.
+ */
+export function getNonRepeatingPrompts(
+  pool: string[],
+  count: number = 3,
+  previouslyShown: Set<string> = new Set()
+): { prompts: string[]; updatedShown: Set<string> } {
+  const unshown = pool.filter((p) => !previouslyShown.has(p));
+
+  let candidatePool = unshown;
+  let nextShown = new Set(previouslyShown);
+
+  if (candidatePool.length < count) {
+    nextShown = new Set();
+    candidatePool = [...pool];
+  }
+
+  const shuffled = [...candidatePool].sort(() => 0.5 - Math.random());
+  const selected = shuffled.slice(0, Math.min(count, shuffled.length));
+
+  selected.forEach((p) => nextShown.add(p));
+
+  return {
+    prompts: selected,
+    updatedShown: nextShown,
+  };
+}
+
+/**
+ * Asynchronous, non-blocking Gemini prompt helper.
+ * Fired roughly ~1/3 of the time on shuffle. Silently falls back if slow or failed.
+ */
+export async function fetchPersonalizedPrompt(
+  type: 'journal' | 'future_letter',
+  recentCategories?: string[],
+  recentSummaries?: string[]
+): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const res = await fetch('/api/prompts/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: type === 'future_letter' ? 'future' : 'journal',
+        recentCategories: recentCategories?.slice(0, 3),
+        recentSummaries: recentSummaries?.slice(0, 2),
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.prompts) && data.prompts.length > 0) {
+        return data.prompts[0];
+      }
+    }
+  } catch {
+    // Silent fallback
+  }
+  return null;
+}
+
+// Helper to pick random distinct items for backward compatibility
 export function getRandomDistinctPrompts(pool: string[], count: number = 3): string[] {
   const shuffled = [...pool].sort(() => 0.5 - Math.random());
   return shuffled.slice(0, Math.min(count, pool.length));

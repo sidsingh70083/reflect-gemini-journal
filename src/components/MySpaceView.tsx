@@ -29,6 +29,9 @@ import {
   FileDown,
   Layers,
   Loader2,
+  ArrowUpRight,
+  Plus,
+  Video,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -39,10 +42,14 @@ import {
   AudioTranscriptionResult,
   VideoAnalysisResult,
   SUPPORTIVE_GREETINGS,
+  CustomAvatarType,
 } from '../types';
+import { UserAvatar } from './UserAvatar';
 import {
   STARTER_PROMPTS_BY_THEME,
   ALL_RICH_STARTER_PROMPTS,
+  getNonRepeatingPrompts,
+  fetchPersonalizedPrompt,
   getRandomDistinctPrompts,
 } from '../lib/promptData';
 import { requestCurrentLocation } from '../lib/geolocation';
@@ -77,12 +84,20 @@ interface MySpaceViewProps {
   user: UserProfile;
   entries: JournalEntry[];
   streak: number;
+  dailyCheckinsEnabled?: boolean;
+  locationEnabled?: boolean;
+  customAvatar?: CustomAvatarType;
+  onNavigateTab?: (tabId: string) => void;
 }
 
 export const MySpaceView: React.FC<MySpaceViewProps> = ({
   user,
   entries,
   streak,
+  dailyCheckinsEnabled = true,
+  locationEnabled = false,
+  customAvatar = 'default',
+  onNavigateTab,
 }) => {
   // Shared Active Chat & Background Reflection Context
   const {
@@ -101,6 +116,22 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
     handleDiscardDraft: discardSessionDraft,
   } = useReflection();
 
+  // Mobile / touch device detection for keyboard behavior and compact layout
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
+  useEffect(() => {
+    const checkMobile = () => {
+      const isTouch = window.matchMedia('(pointer: coarse)').matches;
+      const isNarrow = window.innerWidth < 768;
+      setIsMobileDevice(isTouch || isNarrow);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Mobile secondary tools popover/menu toggle
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+
   // Personalized Greeting & Rotating Supportive Message
   const [supportiveQuote, setSupportiveQuote] = useState('');
   
@@ -108,15 +139,56 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
   const [prompts, setPrompts] = useState<string[]>([]);
   const [isDiscarding, setIsDiscarding] = useState(false);
 
-  // Geotagging State: Enabled by default with option for the user to disable
-  const [isLocationEnabled, setIsLocationEnabled] = useState<boolean>(() => {
+  // User manually toggled starter reflections ref
+  const userManuallyToggledPromptsRef = useRef(false);
+
+  // Prompt suggestions collapsible state (defaults expanded if 0 entries, collapsed if entries > 0)
+  const [isPromptsExpanded, setIsPromptsExpanded] = useState<boolean>(() => {
     try {
-      const stored = localStorage.getItem('mindful_journal_location_enabled');
-      return stored === null ? true : stored !== 'false';
-    } catch {
-      return true;
-    }
+      const stored = localStorage.getItem('mindful_journal_prompts_expanded_myspace');
+      if (stored !== null) {
+        return stored === 'true';
+      }
+    } catch {}
+    return entries.length === 0;
   });
+
+  // Sync default expansion when entries load if user hasn't explicitly toggled it
+  useEffect(() => {
+    if (!userManuallyToggledPromptsRef.current) {
+      try {
+        const stored = localStorage.getItem('mindful_journal_prompts_expanded_myspace');
+        if (stored === null) {
+          setIsPromptsExpanded(entries.length === 0);
+        }
+      } catch {}
+    }
+  }, [entries.length]);
+
+  // Track session shown prompts to prevent repeats until pool exhaustion
+  const shownPromptsRef = useRef<Set<string>>(new Set());
+
+  // Gentle dismissible stress -> Stillness suggestion banner
+  const [stressSuggestion, setStressSuggestion] = useState<{
+    show: boolean;
+    category?: JournalCategory;
+  } | null>(null);
+  const hasShownStressSuggestionRef = useRef(false);
+
+  // Toggle prompts expansion and persist user choice
+  const togglePromptsExpanded = () => {
+    userManuallyToggledPromptsRef.current = true;
+    setIsPromptsExpanded((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('mindful_journal_prompts_expanded_myspace', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  // Location context: default is OFF, controlled via Settings.
+  const isLocationActive = Boolean(locationEnabled);
   const [currentLocation, setCurrentLocation] = useState<JournalLocation | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
@@ -139,6 +211,22 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Auto-grow textarea with user input while staying clean single-line at rest without scrollbar
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      if (!inputText) {
+        textareaRef.current.style.height = '36px';
+        textareaRef.current.style.overflowY = 'hidden';
+      } else {
+        const scrollHeight = textareaRef.current.scrollHeight;
+        const targetHeight = Math.min(Math.max(36, scrollHeight), 160);
+        textareaRef.current.style.height = `${targetHeight}px`;
+        textareaRef.current.style.overflowY = scrollHeight > 160 ? 'auto' : 'hidden';
+      }
+    }
+  }, [inputText]);
+
   // MediaRecorder Audio Hook
   const audioRecorder = useAudioRecorder({
     onTranscriptionComplete: (result, autoSend) => handleAudioTranscription(result, autoSend),
@@ -154,11 +242,13 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
   // Micro-commitment check-in loop calculation:
   const todayKey = getLocalDateKey(new Date());
 
-  const pendingCommitmentEntry = entries.find((entry) => {
-    if (!entry.nextDayCommitment || entry.commitmentCheckin) return false;
-    const entryDateKey = getLocalDateKey(entry.createdAtMillis);
-    return entryDateKey < todayKey;
-  });
+  const pendingCommitmentEntry = dailyCheckinsEnabled
+    ? entries.find((entry) => {
+        if (!entry.nextDayCommitment || entry.commitmentCheckin) return false;
+        const entryDateKey = getLocalDateKey(entry.createdAtMillis);
+        return entryDateKey < todayKey;
+      })
+    : null;
 
   const handleCheckinResponse = async (status: 'yes' | 'not_yet' | 'skip') => {
     if (!pendingCommitmentEntry || isRespondingCheckin) return;
@@ -200,35 +290,46 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
     }
   };
 
-  // Automatically acquire location on load if enabled by default
+  // Automatically acquire location if enabled in settings
   useEffect(() => {
-    if (isLocationEnabled && !currentLocation && !isLocating) {
+    if (isLocationActive && !currentLocation && !isLocating) {
       fetchLocation();
-    }
-  }, [isLocationEnabled]);
-
-  // Toggle & Enable/Disable Geolocation for the user
-  const handleToggleLocation = () => {
-    if (isLocationEnabled) {
-      setIsLocationEnabled(false);
-      try {
-        localStorage.setItem('mindful_journal_location_enabled', 'false');
-      } catch {}
+    } else if (!isLocationActive && currentLocation) {
       setCurrentLocation(null);
-      setLocationError(null);
-    } else {
-      setIsLocationEnabled(true);
-      try {
-        localStorage.setItem('mindful_journal_location_enabled', 'true');
-      } catch {}
-      fetchLocation();
     }
-  };
+  }, [isLocationActive]);
 
-  // Shuffle prompts from rich library — distinct, creative suggestions
+  // Shuffle prompts from rich library — non-repeating until pool exhaustion, with async Gemini blending (~1/3 of the time)
   const shufflePrompts = () => {
-    const nextPrompts = getRandomDistinctPrompts(ALL_RICH_STARTER_PROMPTS, 3);
+    // 1. Immediately pick from hand-written pool with non-repeating guarantee
+    const { prompts: nextPrompts, updatedShown } = getNonRepeatingPrompts(
+      ALL_RICH_STARTER_PROMPTS,
+      3,
+      shownPromptsRef.current
+    );
+    shownPromptsRef.current = updatedShown;
     setPrompts(nextPrompts);
+
+    // 2. ~1/3 of the time, fire an asynchronous, non-blocking request to Gemini conditioned on recent entries
+    if (Math.random() < 0.35) {
+      const recentCats = entries.slice(0, 3).map((e) => e.userCategory || e.aiCategory);
+      const recentSums = entries
+        .slice(0, 2)
+        .map((e) => e.summary)
+        .filter(Boolean) as string[];
+
+      fetchPersonalizedPrompt('journal', recentCats, recentSums).then((freshPrompt) => {
+        if (freshPrompt) {
+          setPrompts((current) => {
+            if (current.length >= 3 && !current.includes(freshPrompt)) {
+              return [current[0], current[1], freshPrompt];
+            }
+            return current;
+          });
+          shownPromptsRef.current.add(freshPrompt);
+        }
+      });
+    }
   };
 
   // Toggle entry selection for PDF export
@@ -246,7 +347,15 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
   };
 
   useEffect(() => {
-    shufflePrompts();
+    // Initial page load: drawn directly from local pool (zero latency, no Gemini call on initial mount)
+    const { prompts: initialPrompts, updatedShown } = getNonRepeatingPrompts(
+      ALL_RICH_STARTER_PROMPTS,
+      3,
+      shownPromptsRef.current
+    );
+    shownPromptsRef.current = updatedShown;
+    setPrompts(initialPrompts);
+
     const randomQuote =
       SUPPORTIVE_GREETINGS[
         Math.floor(Math.random() * SUPPORTIVE_GREETINGS.length)
@@ -320,7 +429,7 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
     textareaRef.current?.focus();
   };
 
-  // Discard draft
+  // Handle Discard draft
   const handleDiscardDraft = () => {
     if (audioRecorder.isRecording) {
       audioRecorder.cancelRecording();
@@ -329,7 +438,7 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
       videoRecorder.cancelRecording();
     }
     discardSessionDraft();
-    if (isLocationEnabled) {
+    if (isLocationActive) {
       fetchLocation();
     } else {
       setCurrentLocation(null);
@@ -354,8 +463,12 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
     await sendToGemini();
   };
 
-  // Handle Enter key in textarea
+  // Handle Enter key in textarea (mobile inserts newline; desktop Enter sends)
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isMobileDevice) {
+      // On touch / mobile screens, pressing Enter simply creates a newline
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -374,15 +487,24 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
 
     const saved = await saveSessionToFirestore(
       streak,
-      () => {
+      (savedCategory) => {
         shufflePrompts();
-        if (isLocationEnabled) {
+        if (isLocationActive) {
           fetchLocation();
         } else {
           setCurrentLocation(null);
         }
+
+        // Gentle, soft suggestion if session touched on Stress or Sadness
+        if (
+          (savedCategory === 'Stress' || savedCategory === 'Sadness') &&
+          !hasShownStressSuggestionRef.current
+        ) {
+          setStressSuggestion({ show: true, category: savedCategory });
+          hasShownStressSuggestionRef.current = true;
+        }
       },
-      isLocationEnabled ? currentLocation : null
+      isLocationActive ? currentLocation : null
     );
   };
 
@@ -422,14 +544,14 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
   };
 
   return (
-    <div id="my-space-container" className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-8 relative">
+    <div id="my-space-container" className="max-w-4xl mx-auto px-4 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-8 relative">
       {/* 1. Personalized Greeting Section with History Drawer Toggle */}
-      <section id="greeting-section" className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="space-y-1.5">
+      <section id="greeting-section" className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+        <div className="space-y-0.5 sm:space-y-1.5">
           <h2 className="font-serif text-2xl sm:text-3xl font-medium tracking-tight text-[#3A3A35] dark:text-[#EDEAE2]">
             Welcome, {firstName}
           </h2>
-          <p className="font-serif italic text-sm text-[#757469] dark:text-[#A6A498] leading-relaxed">
+          <p className="font-serif italic text-xs sm:text-sm text-[#757469] dark:text-[#A6A498] leading-relaxed">
             {supportiveQuote}
           </p>
         </div>
@@ -513,6 +635,51 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
         </section>
       )}
 
+      {/* Gentle, Dismissible Stress -> Stillness Suggestion Banner */}
+      {stressSuggestion?.show && (
+        <section
+          id="stress-stillness-suggestion-banner"
+          className="rounded-2xl border border-indigo-200/70 dark:border-indigo-900/60 bg-indigo-50/80 dark:bg-[#181A26] p-4 sm:p-4.5 shadow-2xs animate-in fade-in duration-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-xs sm:text-sm font-serif font-medium text-[#20201D] dark:text-[#EDEAE2]">
+                Your reflection carried some heavy feelings. Want to take a quiet minute in Stillness?
+              </p>
+              <p className="text-[11px] text-[#636674] dark:text-[#9EA2B8]">
+                A gentle, unhurried space to decompress and draw stars or untangle threads.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-end sm:self-center flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setStressSuggestion(null);
+                if (onNavigateTab) onNavigateTab('stillness');
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-medium transition-all duration-200 cursor-pointer shadow-2xs active:scale-95"
+            >
+              <span>Visit Stillness</span>
+              <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setStressSuggestion(null)}
+              className="p-1.5 rounded-lg text-[#858376] hover:text-[#3A3A35] dark:text-[#8E8C7F] dark:hover:text-[#EDEAE2] hover:bg-indigo-100/60 dark:hover:bg-indigo-950/60 transition-colors duration-200 cursor-pointer"
+              title="Dismiss suggestion"
+              aria-label="Dismiss suggestion"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* 2. Active Journaling Workspace Card */}
       <section
         id="active-journaling-workspace"
@@ -582,18 +749,19 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
         {/* Conversation Thread Area */}
         <div
           id="chat-thread-container"
-          className="min-h-[220px] max-h-[480px] overflow-y-auto p-5 sm:p-6 space-y-4 bg-[#FAF9F5]/40 dark:bg-[#1A1916]/40 scroll-smooth font-sans"
+          className={`${
+            messages.length === 0
+              ? 'min-h-0 sm:min-h-[160px] p-3 sm:p-6'
+              : 'min-h-[180px] sm:min-h-[220px] p-4 sm:p-6'
+          } max-h-[480px] overflow-y-auto space-y-3 sm:space-y-4 bg-[#FAF9F5]/40 dark:bg-[#1A1916]/40 scroll-smooth font-sans`}
         >
           {messages.length === 0 ? (
-            <div className="h-44 flex flex-col items-center justify-center text-center px-4">
-              <div className="w-10 h-10 rounded-full bg-[#EAE8E0] dark:bg-[#282621] flex items-center justify-center text-[#5A5A40] dark:text-[#D4D0C2] mb-3">
-                <Compass className="w-5 h-5" />
+            <div className="py-2 sm:py-6 flex flex-col items-center justify-center text-center px-2">
+              <div className="hidden sm:flex w-9 h-9 rounded-full bg-[#EAE8E0] dark:bg-[#282621] items-center justify-center text-[#5A5A40] dark:text-[#D4D0C2] mb-2.5 shadow-2xs">
+                <Compass className="w-4 h-4" />
               </div>
-              <p className="font-serif text-base font-medium text-[#3A3A35] dark:text-[#EDEAE2] mb-1">
+              <p className="font-serif text-sm sm:text-base font-medium text-[#3A3A35] dark:text-[#EDEAE2]">
                 Your quiet reflection begins here.
-              </p>
-              <p className="text-xs text-[#757469] dark:text-[#A6A498] max-w-sm">
-                Type what you're feeling below or choose an icebreaker prompt to start untangling your day.
               </p>
             </div>
           ) : (
@@ -629,18 +797,14 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
                     </span>
                   </div>
 
-                  {isUser && user.photoURL ? (
-                    <img
-                      src={user.photoURL}
-                      alt={user?.displayName || 'User'}
-                      className="w-7 h-7 rounded-full object-cover flex-shrink-0 mt-0.5 border border-[#D5D2C7] dark:border-[#423F36]"
-                      referrerPolicy="no-referrer"
+                  {isUser && (
+                    <UserAvatar
+                      user={user}
+                      customAvatar={customAvatar}
+                      size="sm"
+                      className="mt-0.5 shrink-0"
                     />
-                  ) : isUser ? (
-                    <div className="w-7 h-7 rounded-full bg-[#EAE8E0] dark:bg-[#2E2C26] text-[#5A5A40] dark:text-[#D4D0C2] flex items-center justify-center flex-shrink-0 text-xs font-semibold mt-0.5 font-serif">
-                      {firstName.charAt(0)}
-                    </div>
-                  ) : null}
+                  )}
                 </div>
               );
             })
@@ -682,46 +846,69 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
         )}
 
         {/* 3. Ice-breaker Starter Prompts (Visible ONLY before conversation starts) */}
-        {/* Starter Reflections (Streamlined & Serene — No clutter, no 'Use Prompt' label) */}
+        {/* Starter Reflections (Collapsible with clear toggle, non-repeating shuffle, optional async AI) */}
         {messages.length === 0 && (
           <div
             id="ice-breaker-section"
-            className="px-5 py-4 border-t border-[#E6E4DD] dark:border-[#2E2C26] bg-[#FAF9F5] dark:bg-[#1D1C18] animate-in fade-in duration-150 space-y-3"
+            className="px-5 py-3.5 border-t border-[#E6E4DD] dark:border-[#2E2C26] bg-[#FAF9F5] dark:bg-[#1D1C18] animate-in fade-in duration-150 space-y-3"
           >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-[#5A5A40] dark:text-[#A6A498] uppercase tracking-wider font-sans">
-                Starter Reflections
-              </span>
-
-              {/* Shuffle Prompts */}
+            <div className="flex items-center justify-between gap-2">
+              {/* Expand / Collapse Header Toggle */}
               <button
-                id="shuffle-prompts-btn"
                 type="button"
-                onClick={shufflePrompts}
-                className="px-2.5 py-1 rounded-lg text-[#757469] hover:text-[#3A3A35] dark:text-[#A6A498] dark:hover:text-[#EDEAE2] hover:bg-[#EAE8E0] dark:hover:bg-[#2A2823] text-xs flex items-center gap-1.5 transition-colors cursor-pointer border border-transparent hover:border-[#D5D2C7] dark:hover:border-[#3E3C34]"
-                title="Shuffle for new creative prompt suggestions"
+                id="toggle-prompts-btn"
+                onClick={togglePromptsExpanded}
+                className="flex items-center gap-2 text-left group cursor-pointer select-none rounded-lg -ml-1.5 px-1.5 py-1 hover:bg-[#EAE8E0]/70 dark:hover:bg-[#282620] transition-colors"
+                title={isPromptsExpanded ? 'Collapse prompt suggestions' : 'Expand prompt suggestions'}
               >
-                <RefreshCw className="w-3 h-3" />
-                <span>Shuffle</span>
+                {isPromptsExpanded ? (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#5A5A40] dark:text-[#D4D0C2] transition-transform" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#858376] dark:text-[#8E8C7F] transition-transform" />
+                )}
+                <span className="text-[11px] font-semibold text-[#5A5A40] dark:text-[#A6A498] uppercase tracking-wider font-sans group-hover:text-[#3A3A35] dark:group-hover:text-[#EDEAE2] transition-colors">
+                  Starter Reflections
+                </span>
+                {!isPromptsExpanded && (
+                  <span className="text-[11px] text-[#858376] dark:text-[#8E8C7F] font-normal font-sans">
+                    · {prompts.length} ideas available
+                  </span>
+                )}
               </button>
+
+              {/* Shuffle Prompts (Visible when expanded) */}
+              {isPromptsExpanded && (
+                <button
+                  id="shuffle-prompts-btn"
+                  type="button"
+                  onClick={shufflePrompts}
+                  className="px-2.5 py-1 rounded-lg text-[#757469] hover:text-[#3A3A35] dark:text-[#A6A498] dark:hover:text-[#EDEAE2] hover:bg-[#EAE8E0] dark:hover:bg-[#2A2823] text-xs flex items-center gap-1.5 transition-colors cursor-pointer border border-transparent hover:border-[#D5D2C7] dark:hover:border-[#3E3C34]"
+                  title="Shuffle for new non-repeating prompt suggestions"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Shuffle</span>
+                </button>
+              )}
             </div>
 
-            {/* Prompt Cards Grid — clean serif cards, click anywhere to reflect */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {prompts.map((promptText, idx) => (
-                <button
-                  key={idx}
-                  id={`starter-prompt-${idx}`}
-                  type="button"
-                  onClick={() => handleSelectPrompt(promptText)}
-                  className="text-left p-3.5 rounded-xl border border-[#D5D2C7] dark:border-[#3E3C34] bg-[#FFFFFF] dark:bg-[#252420] text-[#3A3A35] dark:text-[#EDEAE2] hover:border-[#5A5A40] dark:hover:border-[#D4D0C2] hover:bg-[#F4F1E8] dark:hover:bg-[#2E2C26] transition-all cursor-pointer shadow-2xs active:scale-[0.98] leading-relaxed"
-                >
-                  <p className="font-serif text-[13px] leading-relaxed text-[#3A3A35] dark:text-[#EDEAE2]">
-                    {promptText}
-                  </p>
-                </button>
-              ))}
-            </div>
+            {/* Prompt Cards Grid (Rendered when expanded) */}
+            {isPromptsExpanded && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-0.5 animate-in fade-in duration-200">
+                {prompts.map((promptText, idx) => (
+                  <button
+                    key={idx}
+                    id={`starter-prompt-${idx}`}
+                    type="button"
+                    onClick={() => handleSelectPrompt(promptText)}
+                    className="text-left p-3.5 rounded-xl border border-[#D5D2C7] dark:border-[#3E3C34] bg-[#FFFFFF] dark:bg-[#252420] text-[#3A3A35] dark:text-[#EDEAE2] hover:border-[#5A5A40] dark:hover:border-[#D4D0C2] hover:bg-[#F4F1E8] dark:hover:bg-[#2E2C26] transition-all cursor-pointer shadow-2xs active:scale-[0.98] leading-relaxed"
+                  >
+                    <p className="font-serif text-[13px] leading-relaxed text-[#3A3A35] dark:text-[#EDEAE2]">
+                      {promptText}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -743,43 +930,28 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
             disabled={isGenerating || isSaving}
           />
 
-          {/* Geotag Indicator Pill: Shows location status, enables easy disable toggle */}
-          {isLocationEnabled && currentLocation && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-[#F4F1E8] dark:bg-[#282620] border border-[#D5D2C7] dark:border-[#3E3C34] rounded-xl text-xs text-[#5A5A40] dark:text-[#D4D0C2] animate-in fade-in duration-150">
-              <MapPin className="w-3.5 h-3.5 flex-shrink-0 text-[#5A5A40] dark:text-[#D4D0C2]" />
-              <span className="font-medium truncate flex-1">
-                Location: {currentLocation.placeName}
+          {/* Unobtrusive Location Indicator Pill when enabled in Settings */}
+          {isLocationActive && currentLocation && (
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#F4F1E8] dark:bg-[#282620] border border-[#D5D2C7] dark:border-[#3E3C34] rounded-lg text-xs text-[#5A5A40] dark:text-[#D4D0C2] animate-in fade-in duration-150 w-fit max-w-full">
+              <MapPin className="w-3 h-3 flex-shrink-0 text-[#5A5A40] dark:text-[#D4D0C2]" />
+              <span className="text-[11px] font-medium truncate">
+                {currentLocation.placeName}
               </span>
-              <button
-                type="button"
-                onClick={handleToggleLocation}
-                className="px-2 py-0.5 text-[11px] font-medium text-[#757469] hover:text-rose-600 dark:text-[#A6A498] dark:hover:text-rose-400 hover:bg-[#EAE8E0] dark:hover:bg-[#34322B] rounded transition-colors cursor-pointer"
-                title="Disable location tracking for your reflections"
-              >
-                Disable
-              </button>
             </div>
           )}
 
-          {isLocationEnabled && isLocating && !currentLocation && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-[#F4F1E8]/60 dark:bg-[#282620]/60 border border-[#D5D2C7] dark:border-[#3E3C34] rounded-xl text-xs text-[#757469] dark:text-[#A6A498] animate-in fade-in duration-150">
-              <Loader2 className="w-3.5 h-3.5 flex-shrink-0 animate-spin text-[#5A5A40] dark:text-[#D4D0C2]" />
-              <span className="truncate flex-1">Acquiring current location...</span>
-              <button
-                type="button"
-                onClick={handleToggleLocation}
-                className="px-2 py-0.5 text-[11px] font-medium text-[#757469] hover:text-rose-600 dark:text-[#A6A498] dark:hover:text-rose-400 rounded cursor-pointer"
-              >
-                Disable
-              </button>
+          {isLocationActive && isLocating && !currentLocation && (
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#F4F1E8]/60 dark:bg-[#282620]/60 border border-[#D5D2C7] dark:border-[#3E3C34] rounded-lg text-xs text-[#757469] dark:text-[#A6A498] animate-in fade-in duration-150 w-fit">
+              <Loader2 className="w-3 h-3 flex-shrink-0 animate-spin text-[#5A5A40] dark:text-[#D4D0C2]" />
+              <span className="text-[11px] truncate">Acquiring current location...</span>
             </div>
           )}
 
-          {/* Location Error Notice */}
-          {locationError && isLocationEnabled && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-xl text-xs text-amber-800 dark:text-amber-200 animate-in fade-in duration-150">
-              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 text-amber-600" />
-              <span className="truncate flex-1">{locationError}</span>
+          {/* Location Error Notice (if active) */}
+          {locationError && isLocationActive && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-lg text-xs text-amber-800 dark:text-amber-200 animate-in fade-in duration-150">
+              <AlertCircle className="w-3 h-3 flex-shrink-0 text-amber-600" />
+              <span className="text-[11px] truncate flex-1">{locationError}</span>
               <button
                 type="button"
                 onClick={() => setLocationError(null)}
@@ -790,63 +962,33 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
             </div>
           )}
 
-          <div className="relative flex items-end gap-2 bg-[#FAF9F5] dark:bg-[#1D1C18] rounded-2xl border border-[#D5D2C7] dark:border-[#3E3C34] p-2 focus-within:border-[#5A5A40] dark:focus-within:border-[#D4D0C2] transition-all duration-200">
+          <div className="relative flex items-end gap-1.5 sm:gap-2 bg-[#FAF9F5] dark:bg-[#1D1C18] rounded-2xl border border-[#D5D2C7] dark:border-[#3E3C34] p-1.5 sm:p-2 focus-within:border-[#5A5A40] dark:focus-within:border-[#D4D0C2] transition-all duration-200">
             <textarea
               ref={textareaRef}
               id="journal-input-textarea"
-              rows={2}
+              rows={1}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="What feels important to write down right now? (Enter to send, Shift+Enter for new line)"
-              className="w-full resize-none bg-transparent p-2 text-sm text-[#3A3A35] dark:text-[#EDEAE2] placeholder:text-[#858376] dark:placeholder:text-[#8E8C7F] focus:outline-none leading-relaxed"
+              placeholder={
+                isMobileDevice
+                  ? "What's on your mind?"
+                  : "What feels important to write down right now? (Enter to send, Shift+Enter for new line)"
+              }
+              className="w-full resize-none overflow-hidden bg-transparent py-1.5 px-2 text-sm text-[#3A3A35] dark:text-[#EDEAE2] placeholder:text-[#858376] dark:placeholder:text-[#8E8C7F] focus:outline-none leading-normal min-h-[36px]"
             />
 
-            <div className="flex items-center gap-1.5 flex-shrink-0 pb-1 pr-1">
-              {/* Working Mic / Voice Input Button */}
+            {/* Desktop Action Controls */}
+            <div className="hidden sm:flex items-center gap-1.5 flex-shrink-0 pb-1 pr-1">
               <AudioRecordButton
                 recorder={audioRecorder}
                 disabled={isGenerating || isSaving || videoRecorder.isRecording}
+                size="md"
               />
-
-              {/* Working Camera / Video Reflection Button */}
               <VideoRecordButton
                 recorder={videoRecorder}
                 disabled={isGenerating || isSaving || audioRecorder.isRecording}
               />
-
-              {/* Working Geotag Location Button (Enabled by default with toggle) */}
-              <button
-                id="geotag-location-button"
-                type="button"
-                disabled={isGenerating || isSaving}
-                onClick={handleToggleLocation}
-                className={`p-2 rounded-xl border transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs flex items-center justify-center ${
-                  isLocationEnabled
-                    ? 'bg-[#5A5A40] text-white border-[#5A5A40] dark:bg-[#D4D0C2] dark:text-[#1A1916]'
-                    : 'bg-[#FFFFFF] dark:bg-[#282621] text-[#A6A498] dark:text-[#6E6C62] border-[#D5D2C7] dark:border-[#3E3C34] hover:border-[#5A5A40] dark:hover:border-[#D4D0C2]'
-                }`}
-                title={
-                  isLocationEnabled
-                    ? (currentLocation
-                        ? `Location on: ${currentLocation.placeName}. Click to disable.`
-                        : isLocating
-                        ? 'Acquiring current location... Click to disable.'
-                        : 'Location is enabled by default. Click to disable.')
-                    : 'Location is disabled. Click to enable.'
-                }
-                aria-label={isLocationEnabled ? 'Disable location' : 'Enable location'}
-              >
-                {isLocating ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : isLocationEnabled ? (
-                  <MapPin className="w-4 h-4" />
-                ) : (
-                  <MapPinOff className="w-4 h-4" />
-                )}
-              </button>
-
-              {/* Send Button */}
               <button
                 id="send-message-button"
                 type="button"
@@ -859,7 +1001,73 @@ export const MySpaceView: React.FC<MySpaceViewProps> = ({
                 <Send className="w-4 h-4" />
               </button>
             </div>
+
+            {/* Mobile Compact Action Controls */}
+            <div className="flex sm:hidden items-center gap-1 flex-shrink-0 pb-1 pr-0.5">
+              {/* '+' menu button for secondary video/multimodal tools */}
+              <button
+                id="mobile-more-tools-button"
+                type="button"
+                onClick={() => setIsMoreMenuOpen((v) => !v)}
+                className={`p-1.5 rounded-lg border transition-all duration-200 cursor-pointer shadow-2xs flex items-center justify-center ${
+                  isMoreMenuOpen
+                    ? 'bg-[#5A5A40] text-white border-[#5A5A40] dark:bg-[#D4D0C2] dark:text-[#1A1916]'
+                    : 'bg-[#FFFFFF] dark:bg-[#282621] text-[#757469] dark:text-[#A6A498] border-[#D5D2C7] dark:border-[#3E3C34] hover:bg-[#F4F1E8] dark:hover:bg-[#2A2823]'
+                }`}
+                title="More reflection tools"
+                aria-label="More reflection tools"
+              >
+                <Plus className={`w-3.5 h-3.5 transition-transform duration-200 ${isMoreMenuOpen ? 'rotate-45' : ''}`} />
+              </button>
+
+              {/* Mic / Voice Recording Button */}
+              <AudioRecordButton
+                recorder={audioRecorder}
+                disabled={isGenerating || isSaving || videoRecorder.isRecording}
+                size="sm"
+              />
+
+              {/* Send Button */}
+              <button
+                id="mobile-send-message-button"
+                type="button"
+                disabled={!inputText.trim() || isGenerating}
+                onClick={handleSendMessage}
+                className="p-1.5 rounded-lg bg-[#4A4A38] hover:bg-[#38382A] text-[#F8F7F3] dark:bg-[#D4D0C2] dark:hover:bg-[#E2DFD6] dark:text-[#1A1916] transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed shadow-2xs active:scale-95"
+                title="Send message"
+                aria-label="Send message"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
+
+          {/* Mobile Secondary Tools Expandable Bar */}
+          {isMoreMenuOpen && (
+            <div className="sm:hidden flex items-center justify-between gap-2 p-2 bg-[#FAF9F5] dark:bg-[#1D1C18] rounded-xl border border-[#D5D2C7] dark:border-[#3E3C34] animate-in fade-in slide-in-from-top-1 text-xs">
+              <div className="flex items-center gap-2">
+                <VideoRecordButton
+                  recorder={videoRecorder}
+                  disabled={isGenerating || isSaving || audioRecorder.isRecording}
+                />
+                <span className="text-xs text-[#5A5A40] dark:text-[#D4D0C2] font-medium">
+                  Video Reflection Studio
+                </span>
+              </div>
+              {isLocationActive && (
+                <button
+                  type="button"
+                  onClick={fetchLocation}
+                  disabled={isLocating}
+                  className="px-2 py-1 text-[11px] text-[#757469] dark:text-[#A6A498] hover:text-[#3A3A35] dark:hover:text-[#EDEAE2] rounded flex items-center gap-1 cursor-pointer"
+                  title="Refresh location"
+                >
+                  <MapPin className="w-3 h-3" />
+                  <span>Refresh Loc</span>
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Quick Actions Below Composer */}
           <div className="flex items-center justify-between mt-2.5 px-1 text-xs text-[#858376] dark:text-[#8E8C7F]">

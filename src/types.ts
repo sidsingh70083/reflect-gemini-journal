@@ -43,24 +43,24 @@ export const CATEGORY_CONFIG: Record<JournalCategory, CategoryMeta> = {
   },
   Stress: {
     name: 'Stress',
-    color: '#d97706',
-    bgLight: 'bg-amber-50',
-    bgDark: 'dark:bg-amber-950/40',
-    textLight: 'text-amber-700',
-    textDark: 'dark:text-amber-300',
-    borderLight: 'border-amber-200',
-    borderDark: 'dark:border-amber-800/60',
+    color: '#ea580c',
+    bgLight: 'bg-orange-50',
+    bgDark: 'dark:bg-orange-950/40',
+    textLight: 'text-orange-700',
+    textDark: 'dark:text-orange-300',
+    borderLight: 'border-orange-200',
+    borderDark: 'dark:border-orange-800/60',
     description: 'Pressure, overwhelm, and tension',
   },
   Reflection: {
     name: 'Reflection',
     color: '#2563eb',
-    bgLight: 'bg-sky-50',
-    bgDark: 'dark:bg-sky-950/40',
-    textLight: 'text-sky-700',
-    textDark: 'dark:text-sky-300',
-    borderLight: 'border-sky-200',
-    borderDark: 'dark:border-sky-800/60',
+    bgLight: 'bg-blue-50',
+    bgDark: 'dark:bg-blue-950/40',
+    textLight: 'text-blue-700',
+    textDark: 'dark:text-blue-300',
+    borderLight: 'border-blue-200',
+    borderDark: 'dark:border-blue-800/60',
     description: 'Introspection, understanding, and self-discovery',
   },
   Excitement: {
@@ -76,7 +76,7 @@ export const CATEGORY_CONFIG: Record<JournalCategory, CategoryMeta> = {
   },
   'Problem-Solving': {
     name: 'Problem-Solving',
-    color: '#0284c7',
+    color: '#0d9488',
     bgLight: 'bg-teal-50',
     bgDark: 'dark:bg-teal-950/40',
     textLight: 'text-teal-700',
@@ -87,24 +87,24 @@ export const CATEGORY_CONFIG: Record<JournalCategory, CategoryMeta> = {
   },
   Sadness: {
     name: 'Sadness',
-    color: '#4f46e5',
-    bgLight: 'bg-indigo-50',
-    bgDark: 'dark:bg-indigo-950/40',
-    textLight: 'text-indigo-700',
-    textDark: 'dark:text-indigo-300',
-    borderLight: 'border-indigo-200',
-    borderDark: 'dark:border-indigo-800/60',
+    color: '#be185d',
+    bgLight: 'bg-rose-50',
+    bgDark: 'dark:bg-rose-950/40',
+    textLight: 'text-rose-700',
+    textDark: 'dark:text-rose-300',
+    borderLight: 'border-rose-200',
+    borderDark: 'dark:border-rose-800/60',
     description: 'Grief, vulnerability, melancholy, or heavy emotions',
   },
   Neutral: {
     name: 'Neutral',
-    color: '#4b5563',
-    bgLight: 'bg-stone-100',
-    bgDark: 'dark:bg-stone-800/60',
-    textLight: 'text-stone-700',
-    textDark: 'dark:text-stone-300',
-    borderLight: 'border-stone-200',
-    borderDark: 'dark:border-stone-700',
+    color: '#52525b',
+    bgLight: 'bg-zinc-100',
+    bgDark: 'dark:bg-zinc-800/60',
+    textLight: 'text-zinc-700',
+    textDark: 'dark:text-zinc-300',
+    borderLight: 'border-zinc-200',
+    borderDark: 'dark:border-zinc-700',
     description: 'General observations, daily logs, and balanced thoughts',
   },
 };
@@ -231,3 +231,67 @@ export const SUPPORTIVE_GREETINGS: string[] = [
   "Whatever you are carrying today, let's explore it gently together.",
   "Your words don't need to be polished. Just start wherever feels right.",
 ];
+
+export type AmbientTexture = 'soft-wash' | 'airy' | 'warm-drone' | 'rain';
+
+export interface AmbientTextureOption {
+  id: AmbientTexture;
+  name: string;
+  description: string;
+}
+
+export const AMBIENT_TEXTURE_OPTIONS: AmbientTextureOption[] = [
+  {
+    id: 'soft-wash',
+    name: 'Soft Low Wash',
+    description: 'Low-passed warm oceanic brown noise',
+  },
+  {
+    id: 'airy',
+    name: 'Airy Atmosphere',
+    description: 'Filtered pink noise with gentle modulation',
+  },
+  {
+    id: 'warm-drone',
+    name: 'Warm Drone',
+    description: 'Quiet, slowly drifting low harmonic sine layers',
+  },
+  {
+    id: 'rain',
+    name: 'Quiet Rain',
+    description: 'Soft filtered noise with subtle amplitude variations',
+  },
+];
+
+export type CustomAvatarType =
+  | 'default'
+  | 'initials'
+  | 'crescent'
+  | 'sun'
+  | 'lotus'
+  | 'mountain'
+  | 'compass';
+
+export interface UserSettings {
+  theme: 'light' | 'dark';
+  ambientSoundEnabled: boolean;
+  ambientSoundTexture: AmbientTexture;
+  ambientSoundVolume: number;
+  interactionSoundsEnabled: boolean;
+  dailyCheckinsEnabled: boolean;
+  locationEnabled: boolean;
+  customAvatar: CustomAvatarType;
+  updatedAt?: number;
+}
+
+export const DEFAULT_USER_SETTINGS: UserSettings = {
+  theme: 'light',
+  ambientSoundEnabled: true,
+  ambientSoundTexture: 'soft-wash',
+  ambientSoundVolume: 0.5,
+  interactionSoundsEnabled: true,
+  dailyCheckinsEnabled: true,
+  locationEnabled: false,
+  customAvatar: 'default',
+};
+

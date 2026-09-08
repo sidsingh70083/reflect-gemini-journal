@@ -14,6 +14,7 @@ import {
   Eye,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   Heart,
   BookOpen,
 } from 'lucide-react';
@@ -32,6 +33,8 @@ import {
 import {
   DEAR_FUTURE_ME_THEMES,
   ALL_RICH_FUTURE_LETTER_PROMPTS,
+  getNonRepeatingPrompts,
+  fetchPersonalizedPrompt,
   getRandomDistinctPrompts,
 } from '../lib/promptData';
 
@@ -58,6 +61,33 @@ export const LetterToFutureView: React.FC<LetterToFutureViewProps> = ({ user }) 
   const [activePromptCategory, setActivePromptCategory] = useState<string>('all');
   const [isSparkingAiPrompts, setIsSparkingAiPrompts] = useState(false);
 
+  // Prompt suggestions collapsible state (defaults expanded if 0 letters, collapsed if letters > 0)
+  const [isPromptsExpanded, setIsPromptsExpanded] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem('mindful_journal_prompts_expanded_future');
+      if (stored !== null) {
+        return stored === 'true';
+      }
+    } catch {}
+    return true;
+  });
+  const [hasUserToggledPrompts, setHasUserToggledPrompts] = useState(false);
+
+  // Track session shown prompts to prevent repeats until exhaustion
+  const shownFuturePromptsRef = useRef<Set<string>>(new Set());
+
+  // Toggle prompts expansion and persist user choice
+  const togglePromptsExpanded = () => {
+    setHasUserToggledPrompts(true);
+    setIsPromptsExpanded((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('mindful_journal_prompts_expanded_future', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
   // Newly unlocked spotlight state
   const [newlyArrivedIds, setNewlyArrivedIds] = useState<Set<string>>(new Set());
   const [expandedLetterIds, setExpandedLetterIds] = useState<Set<string>>(new Set());
@@ -82,7 +112,7 @@ export const LetterToFutureView: React.FC<LetterToFutureViewProps> = ({ user }) 
     setScheduledDate(dateStr);
   };
 
-  // Shuffle prompts from rich library
+  // Shuffle prompts from rich library — non-repeating until pool exhaustion, with async Gemini blending (~1/3 of the time)
   const shufflePrompts = (categoryKey = activePromptCategory) => {
     let pool = ALL_RICH_FUTURE_LETTER_PROMPTS;
     if (categoryKey !== 'all') {
@@ -91,11 +121,38 @@ export const LetterToFutureView: React.FC<LetterToFutureViewProps> = ({ user }) 
         pool = theme.prompts;
       }
     }
-    const nextPrompts = getRandomDistinctPrompts(pool, 3);
+
+    // 1. Guaranteed non-repeating from hand-written pool
+    const { prompts: nextPrompts, updatedShown } = getNonRepeatingPrompts(
+      pool,
+      3,
+      shownFuturePromptsRef.current
+    );
+    shownFuturePromptsRef.current = updatedShown;
     setPrompts(nextPrompts);
+
+    // 2. ~1/3 of the time, fire an asynchronous, non-blocking request to Gemini
+    if (Math.random() < 0.35) {
+      let themeLabel = 'introspective letters to future self';
+      if (categoryKey !== 'all') {
+        const found = DEAR_FUTURE_ME_THEMES.find((t) => t.key === categoryKey);
+        if (found) themeLabel = `${found.label} - ${found.description}`;
+      }
+      fetchPersonalizedPrompt('future_letter', [themeLabel]).then((freshPrompt) => {
+        if (freshPrompt) {
+          setPrompts((current) => {
+            if (current.length >= 3 && !current.includes(freshPrompt)) {
+              return [current[0], current[1], freshPrompt];
+            }
+            return current;
+          });
+          shownFuturePromptsRef.current.add(freshPrompt);
+        }
+      });
+    }
   };
 
-  // Dynamically generate bespoke future-letter prompts with Gemini
+  // Dynamically generate bespoke future-letter prompts with Gemini on explicit user trigger
   const sparkAiLetterPrompts = async () => {
     if (isSparkingAiPrompts) return;
     setIsSparkingAiPrompts(true);
@@ -121,6 +178,7 @@ export const LetterToFutureView: React.FC<LetterToFutureViewProps> = ({ user }) 
         const data = await res.json();
         if (Array.isArray(data.prompts) && data.prompts.length > 0) {
           setPrompts(data.prompts.slice(0, 3));
+          data.prompts.forEach((p: string) => shownFuturePromptsRef.current.add(p));
           return;
         }
       }
@@ -139,7 +197,15 @@ export const LetterToFutureView: React.FC<LetterToFutureViewProps> = ({ user }) 
   };
 
   useEffect(() => {
-    shufflePrompts('all');
+    // Initial page load: drawn directly from hand-written pool without calling Gemini
+    const { prompts: initialPrompts, updatedShown } = getNonRepeatingPrompts(
+      ALL_RICH_FUTURE_LETTER_PROMPTS,
+      3,
+      shownFuturePromptsRef.current
+    );
+    shownFuturePromptsRef.current = updatedShown;
+    setPrompts(initialPrompts);
+
     // Default preset date: 1 month (30 days) from now
     setPresetDate(30);
   }, []);
@@ -153,6 +219,14 @@ export const LetterToFutureView: React.FC<LetterToFutureViewProps> = ({ user }) 
         setLetters(userLetters);
         setIsLoadingLetters(false);
         checkAndUnlockLetters(userLetters);
+
+        // Default to expanded for first-time user (0 letters), collapsed thereafter
+        try {
+          const stored = localStorage.getItem('mindful_journal_prompts_expanded_future');
+          if (stored === null && !hasUserToggledPrompts) {
+            setIsPromptsExpanded(userLetters.length === 0);
+          }
+        } catch {}
       },
       (err) => {
         console.error('Failed to subscribe to letters:', err);
@@ -400,47 +474,70 @@ export const LetterToFutureView: React.FC<LetterToFutureViewProps> = ({ user }) 
         </div>
 
         <form onSubmit={handleScheduleLetter} className="p-5 sm:p-6 space-y-5">
-          {/* Inspiration Prompts Bar (Streamlined & Minimalist) */}
+          {/* Inspiration Prompts Bar (Collapsible with clear toggle, non-repeating shuffle, optional async AI) */}
           <div className="space-y-3 p-4 rounded-xl bg-[#FAF9F5] dark:bg-[#1D1C18] border border-[#E6E4DD] dark:border-[#2E2C26]">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-[#5A5A40] dark:text-[#A6A498] uppercase tracking-wider font-sans">
-                Inspiration Prompts
-              </span>
-
-              {/* Shuffle Button */}
+            <div className="flex items-center justify-between gap-2">
+              {/* Expand / Collapse Header Toggle */}
               <button
-                id="future-shuffle-prompts-btn"
                 type="button"
-                onClick={() => shufflePrompts('all')}
-                className="px-2.5 py-1 rounded-lg text-[#757469] hover:text-[#3A3A35] dark:text-[#A6A498] dark:hover:text-[#EDEAE2] hover:bg-[#EAE8E0] dark:hover:bg-[#2A2823] text-xs flex items-center gap-1.5 transition-colors cursor-pointer border border-transparent hover:border-[#D5D2C7] dark:hover:border-[#3E3C34]"
-                title="Shuffle for new introspective prompts"
+                id="toggle-future-prompts-btn"
+                onClick={togglePromptsExpanded}
+                className="flex items-center gap-2 text-left group cursor-pointer select-none rounded-lg -ml-1 px-1 py-0.5 hover:bg-[#EAE8E0]/70 dark:hover:bg-[#282620] transition-colors"
+                title={isPromptsExpanded ? 'Collapse prompt suggestions' : 'Expand prompt suggestions'}
               >
-                <RefreshCw className="w-3 h-3" />
-                <span>Shuffle</span>
+                {isPromptsExpanded ? (
+                  <ChevronDown className="w-3.5 h-3.5 text-[#5A5A40] dark:text-[#D4D0C2] transition-transform" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5 text-[#858376] dark:text-[#8E8C7F] transition-transform" />
+                )}
+                <span className="text-[11px] font-semibold text-[#5A5A40] dark:text-[#A6A498] uppercase tracking-wider font-sans group-hover:text-[#3A3A35] dark:group-hover:text-[#EDEAE2] transition-colors">
+                  Inspiration Prompts
+                </span>
+                {!isPromptsExpanded && (
+                  <span className="text-[11px] text-[#858376] dark:text-[#8E8C7F] font-normal font-sans">
+                    · {prompts.length} ideas available
+                  </span>
+                )}
               </button>
+
+              {/* Shuffle Button (Visible when expanded) */}
+              {isPromptsExpanded && (
+                <button
+                  id="future-shuffle-prompts-btn"
+                  type="button"
+                  onClick={() => shufflePrompts('all')}
+                  className="px-2.5 py-1 rounded-lg text-[#757469] hover:text-[#3A3A35] dark:text-[#A6A498] dark:hover:text-[#EDEAE2] hover:bg-[#EAE8E0] dark:hover:bg-[#2A2823] text-xs flex items-center gap-1.5 transition-colors cursor-pointer border border-transparent hover:border-[#D5D2C7] dark:hover:border-[#3E3C34]"
+                  title="Shuffle for new introspective prompts"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Shuffle</span>
+                </button>
+              )}
             </div>
 
-            {/* Prompts Cards — Click anywhere to add prompt to letter */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {prompts.map((pText, idx) => (
-                <button
-                  key={idx}
-                  id={`future-prompt-suggestion-${idx}`}
-                  type="button"
-                  onClick={() => {
-                    setSelectedPrompt(pText);
-                    setLetterContent((prev) =>
-                      prev.trim() ? `${prev}\n\n${pText}\n` : `${pText}\n\n`
-                    );
-                  }}
-                  className="text-left p-3.5 rounded-xl border border-[#D5D2C7] dark:border-[#3E3C34] bg-[#FFFFFF] dark:bg-[#22211C] text-[#3A3A35] dark:text-[#EDEAE2] hover:border-[#5A5A40] dark:hover:border-[#D4D0C2] hover:bg-[#F4F1E8] dark:hover:bg-[#282621] transition-all cursor-pointer shadow-2xs active:scale-[0.98]"
-                >
-                  <p className="font-serif leading-relaxed text-[13px] text-[#3A3A35] dark:text-[#EDEAE2]">
-                    {pText}
-                  </p>
-                </button>
-              ))}
-            </div>
+            {/* Prompts Cards (Rendered when expanded) */}
+            {isPromptsExpanded && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-0.5 animate-in fade-in duration-200">
+                {prompts.map((pText, idx) => (
+                  <button
+                    key={idx}
+                    id={`future-prompt-suggestion-${idx}`}
+                    type="button"
+                    onClick={() => {
+                      setSelectedPrompt(pText);
+                      setLetterContent((prev) =>
+                        prev.trim() ? `${prev}\n\n${pText}\n` : `${pText}\n\n`
+                      );
+                    }}
+                    className="text-left p-3.5 rounded-xl border border-[#D5D2C7] dark:border-[#3E3C34] bg-[#FFFFFF] dark:bg-[#22211C] text-[#3A3A35] dark:text-[#EDEAE2] hover:border-[#5A5A40] dark:hover:border-[#D4D0C2] hover:bg-[#F4F1E8] dark:hover:bg-[#282621] transition-all cursor-pointer shadow-2xs active:scale-[0.98]"
+                  >
+                    <p className="font-serif leading-relaxed text-[13px] text-[#3A3A35] dark:text-[#EDEAE2]">
+                      {pText}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Letter Textarea */}

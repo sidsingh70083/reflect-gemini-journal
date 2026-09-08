@@ -25,6 +25,8 @@ import {
   formatLocalDate,
   formatLocalMonthDay,
   formatLocalDateTime,
+  formatDateRange,
+  parseDocTimestamp,
 } from '../lib/dateUtils';
 import { CadenceHeatmap } from './CadenceHeatmap';
 
@@ -68,9 +70,7 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ user, entries }) => {
 
   // Entries created after the latest digest
   const newEntries = entries.filter((e) => {
-    const millis =
-      e.createdAtMillis ||
-      (e.createdAt?.toMillis ? e.createdAt.toMillis() : 0);
+    const millis = parseDocTimestamp(e) || e.createdAtMillis || 0;
     return millis > lastDigestCutoffMillis;
   });
 
@@ -78,14 +78,15 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ user, entries }) => {
   const oldestNewEntry =
     newEntries.length > 0
       ? newEntries.reduce((oldest, current) => {
-          const m = current.createdAtMillis || 0;
-          return m < (oldest.createdAtMillis || Infinity) ? current : oldest;
+          const m = parseDocTimestamp(current) || current.createdAtMillis || 0;
+          const oldestM = parseDocTimestamp(oldest) || oldest.createdAtMillis || Infinity;
+          return m < oldestM ? current : oldest;
         }, newEntries[0])
       : null;
 
   const referenceStartMillis = lastDigestCutoffMillis > 0
     ? lastDigestCutoffMillis
-    : oldestNewEntry?.createdAtMillis || Date.now();
+    : (oldestNewEntry ? parseDocTimestamp(oldestNewEntry) || oldestNewEntry.createdAtMillis || Date.now() : Date.now());
 
   const daysElapsed = Math.max(
     0,
@@ -128,15 +129,19 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ user, entries }) => {
 
       const data = await response.json();
 
-      // 2. Format date range
+      // 2. Format date range using robust timestamp resolution
       const sortedNew = [...newEntries].sort(
-        (a, b) => (a.createdAtMillis || 0) - (b.createdAtMillis || 0)
+        (a, b) =>
+          (parseDocTimestamp(a) || a.createdAtMillis || 0) -
+          (parseDocTimestamp(b) || b.createdAtMillis || 0)
       );
       const startEntry = sortedNew[0];
       const endEntry = sortedNew[sortedNew.length - 1];
 
-      const startMillis = startEntry.createdAtMillis || Date.now();
-      const endMillis = endEntry.createdAtMillis || Date.now();
+      const startMillis =
+        parseDocTimestamp(startEntry) || startEntry.createdAtMillis || Date.now();
+      const endMillis =
+        parseDocTimestamp(endEntry) || endEntry.createdAtMillis || Date.now();
 
       const startDateStr = formatLocalMonthDay(startMillis);
       const endDateStr = formatLocalDate(endMillis);
@@ -243,7 +248,9 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ user, entries }) => {
               <div className="flex items-center gap-1.5 font-medium">
                 <BookOpen className="w-3.5 h-3.5 text-[#5A5A40] dark:text-[#D4D0C2]" />
                 <span>
-                  {newEntries.length} / 7 reflections
+                  {newEntries.length >= 7
+                    ? `${newEntries.length} reflections ready`
+                    : `${newEntries.length} / 7 reflections`}
                 </span>
               </div>
               <div className="w-24 bg-[#EAE8E0] dark:bg-[#2E2C26] rounded-full h-1.5 overflow-hidden">
@@ -347,9 +354,20 @@ export const TrendsView: React.FC<TrendsViewProps> = ({ user, entries }) => {
           <div className="space-y-4" id="digests-list">
             {digests.map((digest) => {
               const isExpanded = expandedDigestId === digest.id;
-              const dateRangeText = digest.dateRange
-                ? `${digest.dateRange.startDate} – ${digest.dateRange.endDate}`
-                : formatLocalDate(digest.createdAtMillis);
+              const dateRangeText = (() => {
+                if (!digest.dateRange) {
+                  return formatLocalDate(digest.createdAtMillis);
+                }
+                const { startMillis, endMillis, startDate, endDate } = digest.dateRange;
+                if (startMillis && endMillis) {
+                  return formatDateRange(startMillis, endMillis);
+                }
+                if (startDate && endDate) {
+                  if (startDate === endDate) return startDate;
+                  return `${startDate} – ${endDate}`;
+                }
+                return startDate || endDate || formatLocalDate(digest.createdAtMillis);
+              })();
 
               return (
                 <div
